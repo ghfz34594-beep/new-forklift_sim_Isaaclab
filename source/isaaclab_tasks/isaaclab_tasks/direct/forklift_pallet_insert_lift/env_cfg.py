@@ -210,6 +210,19 @@ class ForkliftPalletInsertLiftEnvCfg(DirectRLEnvCfg):
     preinsert_push_termination_m: float = 0.25
     preinsert_push_termination_min_steps: int = 8
     preinsert_push_termination_penalty_weight: float = 80.0
+    preinsert_contact_clean_gate_enable: bool = False
+    preinsert_contact_dist_m: float = 0.08
+    preinsert_contact_dist_ramp_m: float = 0.18
+    preinsert_contact_insert_frac_max: float = 0.25
+    preinsert_contact_gate_floor: float = 0.0
+    preinsert_contact_center_sigma_m: float = 0.10
+    preinsert_contact_yaw_sigma_deg: float = 5.0
+    preinsert_contact_tip_sigma_m: float = 0.10
+    preinsert_contact_gate_r_d: bool = True
+    preinsert_contact_gate_r_cd: bool = True
+    preinsert_contact_gate_r_cpsi: bool = True
+    preinsert_contact_drive_penalty_weight: float = 6.0
+    preinsert_contact_drive_vel_scale_mps: float = 0.40
 
     # ---- Steering curriculum v2: pre-insert correction shaping ----
     # 在真正插入前，继续奖励“横向 / 偏航 / 前向距离变好”，
