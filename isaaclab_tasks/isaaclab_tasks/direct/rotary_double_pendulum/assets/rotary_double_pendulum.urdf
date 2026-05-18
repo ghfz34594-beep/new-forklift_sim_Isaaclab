@@ -1,0 +1,227 @@
+<?xml version="1.0"?>
+<!--
+  Acrobot - 二阶倒立摆 (Double Inverted Pendulum)
+  
+  ============================================================================
+  结构说明：
+  ============================================================================
+  - base_link: 虚拟固定点（无几何体，固定在世界坐标系）
+  - motor_link: 电机外壳（蓝色圆柱，悬浮在 z=1.2m）
+  - link1: 第一段摆杆（绿色），通过 joint1（驱动关节）连接到电机
+  - link2: 第二段摆杆（橙色），通过 joint2（被动关节）连接到 link1 末端
+  
+  ============================================================================
+  坐标系与运动说明：
+  ============================================================================
+  - 所有关节绕 X 轴旋转（水平轴）
+  - 摆杆在 YZ 平面内摆动
+  - 初始状态：两段摆杆自然下垂（沿 -Z 方向）
+  - 目标：控制 joint1 使两段摆杆稳定在竖直向上位置（+Z 方向）
+  
+  ============================================================================
+  几何位置（地面 z=0）：
+  ============================================================================
+  - 电机中心: z = 1.2m
+  - Link1 下垂时末端: z = 0.7m
+  - Link2 下垂时末端: z = 0.2m（距地面 0.2m）
+  
+  ============================================================================
+  物理参数：
+  ============================================================================
+  - Link1: 长度 0.5m, 质量 1.0kg, 惯性矩 I ≈ 0.021 kg·m² (绕质心)
+  - Link2: 长度 0.5m, 质量 0.5kg, 惯性矩 I ≈ 0.010 kg·m² (绕质心)
+  - Joint1: 驱动关节，力矩限制 10 N·m
+  - Joint2: 被动关节，无驱动力矩
+-->
+<robot name="acrobot">
+
+  <!-- ====================================================================== -->
+  <!-- 材质定义 -->
+  <!-- ====================================================================== -->
+  <material name="motor_blue">
+    <color rgba="0.15 0.25 0.65 1.0"/>
+  </material>
+  
+  <material name="silver">
+    <color rgba="0.8 0.8 0.85 1.0"/>
+  </material>
+  
+  <material name="link1_green">
+    <color rgba="0.1 0.55 0.2 1.0"/>
+  </material>
+  
+  <material name="link2_orange">
+    <color rgba="0.95 0.45 0.1 1.0"/>
+  </material>
+  
+  <material name="end_marker_red">
+    <color rgba="0.85 0.1 0.1 1.0"/>
+  </material>
+
+  <!-- ====================================================================== -->
+  <!-- Base Link: 虚拟固定点（无几何体） -->
+  <!-- ====================================================================== -->
+  <link name="base_link">
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <mass value="0.001"/>
+      <inertia ixx="0.000001" ixy="0.0" ixz="0.0" 
+               iyy="0.000001" iyz="0.0" 
+               izz="0.000001"/>
+    </inertial>
+  </link>
+
+  <!-- ====================================================================== -->
+  <!-- Motor Link: 电机外壳（悬浮在 z=1.2m） -->
+  <!-- ====================================================================== -->
+  <link name="motor_link">
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <mass value="0.8"/>
+      <inertia ixx="0.002" ixy="0.0" ixz="0.0" 
+               iyy="0.002" iyz="0.0" 
+               izz="0.002"/>
+    </inertial>
+    
+    <!-- 电机主体（圆柱形，沿X轴放置） -->
+    <visual name="motor_body">
+      <origin xyz="0 0 0" rpy="0 1.5708 0"/>
+      <geometry>
+        <cylinder radius="0.055" length="0.1"/>
+      </geometry>
+      <material name="motor_blue"/>
+    </visual>
+    <collision name="motor_body_col">
+      <origin xyz="0 0 0" rpy="0 1.5708 0"/>
+      <geometry>
+        <cylinder radius="0.055" length="0.1"/>
+      </geometry>
+    </collision>
+    
+    <!-- 电机轴（银色，穿过电机两侧） -->
+    <visual name="motor_shaft">
+      <origin xyz="0 0 0" rpy="0 1.5708 0"/>
+      <geometry>
+        <cylinder radius="0.012" length="0.14"/>
+      </geometry>
+      <material name="silver"/>
+    </visual>
+  </link>
+
+  <!-- 固定连接：base_link 到电机，电机位于 z=1.2m -->
+  <joint name="base_to_motor" type="fixed">
+    <parent link="base_link"/>
+    <child link="motor_link"/>
+    <origin xyz="0 0 1.2" rpy="0 0 0"/>
+  </joint>
+
+  <!-- ====================================================================== -->
+  <!-- Link1: 第一段摆杆（驱动端） -->
+  <!-- ====================================================================== -->
+  <link name="link1">
+    <inertial>
+      <origin xyz="0 0 -0.25" rpy="0 0 0"/>
+      <mass value="1.0"/>
+      <inertia ixx="0.0208" ixy="0.0" ixz="0.0" 
+               iyy="0.0208" iyz="0.0" 
+               izz="0.0008"/>
+    </inertial>
+    
+    <!-- 顶部轴套 -->
+    <visual name="link1_hub">
+      <origin xyz="0 0 0" rpy="0 1.5708 0"/>
+      <geometry>
+        <cylinder radius="0.028" length="0.05"/>
+      </geometry>
+      <material name="silver"/>
+    </visual>
+    
+    <!-- 摆杆主体 -->
+    <visual name="link1_rod">
+      <origin xyz="0 0 -0.25" rpy="0 0 0"/>
+      <geometry>
+        <cylinder radius="0.018" length="0.5"/>
+      </geometry>
+      <material name="link1_green"/>
+    </visual>
+    <collision name="link1_rod_col">
+      <origin xyz="0 0 -0.25" rpy="0 0 0"/>
+      <geometry>
+        <cylinder radius="0.018" length="0.5"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <!-- Joint1: 驱动关节（绕X轴旋转） -->
+  <joint name="joint1" type="revolute">
+    <parent link="motor_link"/>
+    <child link="link1"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <axis xyz="1 0 0"/>
+    <limit effort="10.0" velocity="20.0" lower="-6.2832" upper="6.2832"/>
+    <dynamics damping="0.1" friction="0.01"/>
+  </joint>
+
+  <!-- ====================================================================== -->
+  <!-- Link2: 第二段摆杆（被动端） -->
+  <!-- ====================================================================== -->
+  <link name="link2">
+    <inertial>
+      <origin xyz="0 0 -0.25" rpy="0 0 0"/>
+      <mass value="0.5"/>
+      <inertia ixx="0.0104" ixy="0.0" ixz="0.0" 
+               iyy="0.0104" iyz="0.0" 
+               izz="0.0004"/>
+    </inertial>
+    
+    <!-- 顶部轴套 -->
+    <visual name="link2_hub">
+      <origin xyz="0 0 0" rpy="0 1.5708 0"/>
+      <geometry>
+        <cylinder radius="0.022" length="0.04"/>
+      </geometry>
+      <material name="silver"/>
+    </visual>
+    
+    <!-- 摆杆主体 -->
+    <visual name="link2_rod">
+      <origin xyz="0 0 -0.25" rpy="0 0 0"/>
+      <geometry>
+        <cylinder radius="0.014" length="0.5"/>
+      </geometry>
+      <material name="link2_orange"/>
+    </visual>
+    <collision name="link2_rod_col">
+      <origin xyz="0 0 -0.25" rpy="0 0 0"/>
+      <geometry>
+        <cylinder radius="0.014" length="0.5"/>
+      </geometry>
+    </collision>
+    
+    <!-- 末端标识球 -->
+    <visual name="end_marker">
+      <origin xyz="0 0 -0.5" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.03"/>
+      </geometry>
+      <material name="end_marker_red"/>
+    </visual>
+    <collision name="end_marker_col">
+      <origin xyz="0 0 -0.5" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.03"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <!-- Joint2: 被动关节（轴承，无限旋转） -->
+  <joint name="joint2" type="continuous">
+    <parent link="link1"/>
+    <child link="link2"/>
+    <origin xyz="0 0 -0.5" rpy="0 0 0"/>
+    <axis xyz="1 0 0"/>
+    <limit effort="0.0" velocity="30.0"/>
+    <dynamics damping="0.02" friction="0.001"/>
+  </joint>
+
+</robot>
