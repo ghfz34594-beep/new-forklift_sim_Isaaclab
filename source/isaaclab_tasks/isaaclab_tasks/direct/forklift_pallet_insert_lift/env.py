@@ -446,6 +446,7 @@ class ForkliftPalletInsertLiftEnv(DirectRLEnv):
         self._hold_counter = torch.zeros((self.num_envs,), dtype=torch.float32, device=self.device)
         self._last_hold_entry = torch.zeros((self.num_envs,), dtype=torch.bool, device=self.device)
         self._success_termination = torch.zeros((self.num_envs,), dtype=torch.bool, device=self.device)
+        self._preinsert_push_termination = torch.zeros((self.num_envs,), dtype=torch.bool, device=self.device)
         self._lift_pos_target = torch.zeros((self.num_envs,), device=self.device)
 
         # ---- 实验 B: 论文原生 Reward 缓存 ----
@@ -2389,6 +2390,16 @@ class ForkliftPalletInsertLiftEnv(DirectRLEnv):
         else:
             r_preinsert_push = torch.zeros_like(insert_norm)
 
+        if self.cfg.preinsert_push_termination_enable:
+            preinsert_push_termination = self._preinsert_push_termination
+            r_preinsert_push_termination = -(
+                self.cfg.preinsert_push_termination_penalty_weight
+                * preinsert_push_termination.float()
+            )
+        else:
+            preinsert_push_termination = torch.zeros_like(success_next, dtype=torch.bool)
+            r_preinsert_push_termination = torch.zeros_like(insert_norm)
+
         # O2/O3: post-insert lateral/tip/yaw dense shaping
         if self.cfg.postinsert_align_enable:
             postinsert_active = (insert_depth >= self._insert_thresh).float()
@@ -2538,6 +2549,7 @@ class ForkliftPalletInsertLiftEnv(DirectRLEnv):
             r_dirty_success +
             r_preinsert_retreat +
             r_preinsert_push +
+            r_preinsert_push_termination +
             r_premature_lift +
             r_post_lift_stability
         )
@@ -2654,6 +2666,7 @@ class ForkliftPalletInsertLiftEnv(DirectRLEnv):
         self.extras["log"]["paper_reward/r_preinsert_align"] = r_preinsert_align.mean()
         self.extras["log"]["paper_reward/r_preinsert_retreat"] = r_preinsert_retreat.mean()
         self.extras["log"]["paper_reward/r_preinsert_push"] = r_preinsert_push.mean()
+        self.extras["log"]["paper_reward/r_preinsert_push_termination"] = r_preinsert_push_termination.mean()
         self.extras["log"]["paper_reward/r_postinsert_align"] = r_postinsert_align.mean()
         self.extras["log"]["paper_reward/rg"] = rg.mean()
         self.extras["log"]["paper_reward/r_success"] = r_success.mean()
@@ -2707,6 +2720,7 @@ class ForkliftPalletInsertLiftEnv(DirectRLEnv):
             prehold_reachable_band_companion_frac_of_inserted
         )
         self.extras["log"]["diag/preinsert_active_frac"] = preinsert_active.mean()
+        self.extras["log"]["diag/preinsert_push_termination_frac"] = preinsert_push_termination.float().mean()
         self.extras["log"]["diag/preinsert_y_delta_mean"] = y_delta.mean()
         self.extras["log"]["diag/preinsert_yaw_delta_mean"] = yaw_delta.mean()
         self.extras["log"]["diag/preinsert_dist_delta_mean"] = dist_delta.mean()
@@ -2777,12 +2791,39 @@ class ForkliftPalletInsertLiftEnv(DirectRLEnv):
         out_of_bounds = self._exp83_out_of_bounds_mask(dist_center_family)
         return tipped, success, out_of_bounds
 
+    def _preinsert_push_termination_mask(self) -> torch.Tensor:
+        """Early-stop Stage A failures that push the pallet before insertion."""
+        if not self.cfg.preinsert_push_termination_enable:
+            return torch.zeros((self.num_envs,), dtype=torch.bool, device=self.device)
+
+        self._joint_pos[:] = self.robot.root_physx_view.get_dof_positions()
+        pallet_pos = self.pallet.data.root_pos_w
+        pallet_yaw = _quat_to_yaw(self.pallet.data.root_quat_w)
+        tip = self._compute_fork_tip()
+
+        u_in = torch.stack([torch.cos(pallet_yaw), torch.sin(pallet_yaw)], dim=-1)
+        rel_tip = tip[:, :2] - pallet_pos[:, :2]
+        s_tip = torch.sum(rel_tip * u_in, dim=-1)
+        s_front = -0.5 * self.cfg.pallet_depth_m
+        insert_depth = torch.clamp(s_tip - s_front, min=0.0)
+
+        pallet_init_pos_xy = torch.tensor(self.cfg.pallet_cfg.init_state.pos[:2], device=self.device)
+        pallet_disp_xy = torch.norm(pallet_pos[:, :2] - pallet_init_pos_xy, dim=-1)
+
+        return (
+            (pallet_disp_xy >= self.cfg.preinsert_push_termination_m)
+            & (insert_depth < self._insert_thresh)
+            & (self.episode_length_buf >= int(self.cfg.preinsert_push_termination_min_steps))
+            & (~self._success_termination)
+        )
+
     def _get_dones(self) -> tuple[torch.Tensor, torch.Tensor]:
         # time out
         time_out = self.episode_length_buf >= self.max_episode_length - 1
 
         tipped, success, out_of_bounds = self._termination_masks()
-        terminated = tipped | success | out_of_bounds
+        self._preinsert_push_termination = self._preinsert_push_termination_mask()
+        terminated = tipped | success | out_of_bounds | self._preinsert_push_termination
         return terminated, time_out
 
     # ---------------------------
@@ -2812,6 +2853,7 @@ class ForkliftPalletInsertLiftEnv(DirectRLEnv):
         self._hold_counter[env_ids] = 0
         self._last_hold_entry[env_ids] = False
         self._success_termination[env_ids] = False
+        self._preinsert_push_termination[env_ids] = False
         self._prev_lift_height[env_ids] = 0.0
         self._is_first_step[env_ids] = True
         self._lift_pos_target[env_ids] = 0.0

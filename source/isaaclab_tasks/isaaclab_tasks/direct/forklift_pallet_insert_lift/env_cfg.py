@@ -206,6 +206,10 @@ class ForkliftPalletInsertLiftEnvCfg(DirectRLEnvCfg):
     preinsert_push_penalty_weight: float = 4.0
     preinsert_push_penalty_start_m: float = 0.03
     preinsert_push_penalty_scale_m: float = 0.20
+    preinsert_push_termination_enable: bool = False
+    preinsert_push_termination_m: float = 0.25
+    preinsert_push_termination_min_steps: int = 8
+    preinsert_push_termination_penalty_weight: float = 80.0
 
     # ---- Steering curriculum v2: pre-insert correction shaping ----
     # 在真正插入前，继续奖励“横向 / 偏航 / 前向距离变好”，
