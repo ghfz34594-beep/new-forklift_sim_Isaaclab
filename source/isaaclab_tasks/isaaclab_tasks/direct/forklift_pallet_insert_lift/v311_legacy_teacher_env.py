@@ -37,9 +37,9 @@ from isaaclab.assets import Articulation, RigidObject
 from isaaclab.envs import DirectRLEnv
 from isaaclab.sensors import TiledCamera
 from isaaclab.sim.spawners.from_files import spawn_ground_plane
-from isaaclab.utils.math import quat_apply, quat_apply_inverse, quat_mul, sample_uniform
+from isaaclab.utils.math import quat_apply, quat_apply_inverse, sample_uniform
 
-from .env_cfg import ForkliftPalletInsertLiftEnvCfg
+from .v311_legacy_teacher_env_cfg import ForkliftPalletInsertLiftEnvCfg
 from .hold_logic import HoldLogicConfig, compute_hold_logic
 
 
@@ -346,40 +346,6 @@ def _spawn_local_ground_plane(prim_path: str, cfg) -> None:
     )
 
 
-def _ensure_ground_plane_covers_env_grid(cfg) -> None:
-    """Resize the shared ground plane so every cloned env sits on the floor."""
-    scene_cfg = getattr(cfg, "scene", None)
-    ground_cfg = getattr(cfg, "ground_cfg", None)
-    if scene_cfg is None or ground_cfg is None:
-        return
-
-    num_envs = int(getattr(scene_cfg, "num_envs", 1) or 1)
-    env_spacing = float(getattr(scene_cfg, "env_spacing", 0.0) or 0.0)
-    if num_envs <= 1 or env_spacing <= 0.0:
-        return
-
-    try:
-        size_x, size_y = ground_cfg.size
-    except Exception:
-        return
-
-    grid_side = int(math.ceil(math.sqrt(float(num_envs))))
-    grid_span = max(0.0, float(grid_side - 1) * env_spacing)
-    required_size = grid_span + 8.0 * env_spacing
-    new_size_x = max(float(size_x), required_size)
-    new_size_y = max(float(size_y), required_size)
-    if new_size_x <= float(size_x) + 1e-6 and new_size_y <= float(size_y) + 1e-6:
-        return
-
-    print(
-        "[info] Enlarging ground plane for cloned env grid: "
-        f"num_envs={num_envs}, env_spacing={env_spacing:.1f}, "
-        f"size=({float(size_x):.1f}, {float(size_y):.1f}) -> "
-        f"({new_size_x:.1f}, {new_size_y:.1f})"
-    )
-    ground_cfg.size = (new_size_x, new_size_y)
-
-
 def _spawn_vision_isolation_room(env_prim_path: str, cfg) -> None:
     """Spawn static room walls under one env so cloned RGB cameras cannot see other envs."""
     if not bool(getattr(cfg, "vision_room_enable", False)):
@@ -392,14 +358,6 @@ def _spawn_vision_isolation_room(env_prim_path: str, cfg) -> None:
     cx = float(getattr(cfg, "vision_room_center_x_m", -1.5))
     cy = float(getattr(cfg, "vision_room_center_y_m", 0.0))
     z = 0.5 * height
-    env_spacing = float(getattr(getattr(cfg, "scene", None), "env_spacing", 0.0))
-    room_span = max(length + 2.0 * thickness, width + 2.0 * thickness)
-    if env_spacing > 0.0 and env_spacing < room_span:
-        raise RuntimeError(
-            "vision_room cannot provide scalable multi-env isolation because rooms overlap: "
-            f"env_spacing={env_spacing:.3f}, required>={room_span:.3f}. "
-            "Increase scene.env_spacing or reduce vision_room dimensions before RGB training."
-        )
 
     visual_material = sim_utils.PreviewSurfaceCfg(
         diffuse_color=tuple(getattr(cfg, "vision_room_color", (0.55, 0.58, 0.60))),
@@ -421,16 +379,10 @@ def _spawn_vision_isolation_room(env_prim_path: str, cfg) -> None:
     spawn_wall("WallNegX", (thickness, width + 2.0 * thickness, height), (cx - 0.5 * length, cy, z))
     spawn_wall("WallPosY", (length, thickness, height), (cx, cy + 0.5 * width, z))
     spawn_wall("WallNegY", (length, thickness, height), (cx, cy - 0.5 * width, z))
-    if bool(getattr(cfg, "vision_room_floor_enable", True)):
-        spawn_wall("Floor", (length + 2.0 * thickness, width + 2.0 * thickness, thickness), (cx, cy, -0.5 * thickness))
-    if bool(getattr(cfg, "vision_room_ceiling_enable", True)):
-        spawn_wall("Ceiling", (length + 2.0 * thickness, width + 2.0 * thickness, thickness), (cx, cy, height))
     print(
         "[info] Vision isolation room spawned: "
         f"env={env_prim_path}, size=({length:.1f}, {width:.1f}, {height:.1f}), "
-        f"wall={thickness:.2f}, ceiling={bool(getattr(cfg, 'vision_room_ceiling_enable', True))}, "
-        f"floor={bool(getattr(cfg, 'vision_room_floor_enable', True))}, "
-        f"collision={bool(collision_props is not None)}"
+        f"wall={thickness:.2f}, collision={bool(collision_props is not None)}"
     )
 
 
@@ -595,7 +547,6 @@ class ForkliftPalletInsertLiftEnv(DirectRLEnv):
         self._traj_tangents = torch.zeros((self.num_envs, self.cfg.traj_num_samples, 2), device=self.device)
         self._traj_s_norm = torch.zeros((self.num_envs, self.cfg.traj_num_samples), device=self.device)
         self._prev_phi_traj = torch.zeros((self.num_envs,), device=self.device)
-        self._prev_progress_curve_score = torch.zeros((self.num_envs,), device=self.device)
         # _reset_idx 中引用的遗留缓存（必须初始化以防 AttributeError）
         self._prev_phi_align = torch.zeros((self.num_envs,), device=self.device)
         self._prev_phi_lift_progress = torch.zeros((self.num_envs,), device=self.device)
@@ -624,12 +575,6 @@ class ForkliftPalletInsertLiftEnv(DirectRLEnv):
         )
         self._debug_near_hard_curriculum = torch.zeros(
             (self.num_envs,), dtype=torch.bool, device=self.device
-        )
-        self._teacher_reference_reset_active = torch.zeros(
-            (self.num_envs,), dtype=torch.bool, device=self.device
-        )
-        self._teacher_reference_reset_phase = torch.zeros(
-            (self.num_envs,), dtype=torch.int32, device=self.device
         )
         self._preinsert_action_guard_latched = torch.zeros(
             (self.num_envs,), dtype=torch.bool, device=self.device
@@ -734,47 +679,6 @@ class ForkliftPalletInsertLiftEnv(DirectRLEnv):
     def _pallet_disp_xy(self) -> torch.Tensor:
         """Pallet XY displacement from the actual reset pose of each env."""
         return torch.norm(self.pallet.data.root_pos_w[:, :2] - self._pallet_reset_xy_w, dim=-1)
-
-    def _camera_local_pos_m(self, values: tuple[float, float, float]) -> torch.Tensor:
-        """Convert camera local offsets to meters, accepting legacy centimeter configs."""
-        pos = torch.tensor(values, dtype=torch.float32, device=self.device)
-        if torch.max(torch.abs(pos)).item() > 10.0:
-            pos = pos * 0.01
-        return pos.unsqueeze(0).expand(self.num_envs, -1)
-
-    def _camera_local_quat(self, rpy_deg: tuple[float, float, float]) -> torch.Tensor:
-        quat = torch.tensor(_quat_from_rpy_deg(*rpy_deg), dtype=torch.float32, device=self.device)
-        return quat.unsqueeze(0).expand(self.num_envs, -1)
-
-    def _sync_camera_poses_to_robot(self) -> None:
-        """Manually keep USD camera prims attached to the PhysX robot pose.
-
-        The camera prims are spawned under ``Robot/body``, but PhysX articulation
-        motion does not update those USD xforms in time for TiledCamera rendering.
-        """
-        if not self._camera_initialized:
-            return
-        root_pos = self.robot.data.root_pos_w
-        root_quat = self.robot.data.root_quat_w
-
-        if self._dual_camera_enabled and self._camera_left is not None and self._camera_right is not None:
-            left_pos_local = self._camera_local_pos_m(tuple(self.cfg.dual_camera_left_pos_local))
-            right_pos_local = self._camera_local_pos_m(tuple(self.cfg.dual_camera_right_pos_local))
-            left_rot_local = self._camera_local_quat(tuple(self.cfg.dual_camera_left_rpy_local_deg))
-            right_rot_local = self._camera_local_quat(tuple(self.cfg.dual_camera_right_rpy_local_deg))
-
-            left_pos_w = root_pos + quat_apply(root_quat, left_pos_local)
-            right_pos_w = root_pos + quat_apply(root_quat, right_pos_local)
-            left_quat_w = quat_mul(root_quat, left_rot_local)
-            right_quat_w = quat_mul(root_quat, right_rot_local)
-            self._camera_left.set_world_poses(left_pos_w, left_quat_w, convention="world")
-            self._camera_right.set_world_poses(right_pos_w, right_quat_w, convention="world")
-        elif self._camera_enabled and self._camera is not None:
-            pos_local = self._camera_local_pos_m(tuple(self.cfg.camera_pos_local))
-            rot_local = self._camera_local_quat(tuple(self.cfg.camera_rpy_local_deg))
-            pos_w = root_pos + quat_apply(root_quat, pos_local)
-            quat_w = quat_mul(root_quat, rot_local)
-            self._camera.set_world_poses(pos_w, quat_w, convention="world")
 
     def _fix_lift_joint_drive(self):
         """覆盖 lift_joint 的 USD DriveAPI 参数为位置控制模式。
@@ -1182,12 +1086,6 @@ class ForkliftPalletInsertLiftEnv(DirectRLEnv):
                 self.cfg.tiled_camera_left.height = int(self.cfg.dual_camera_height)
                 self.cfg.tiled_camera_right.width = int(self.cfg.dual_camera_width)
                 self.cfg.tiled_camera_right.height = int(self.cfg.dual_camera_height)
-                clip_range = (
-                    float(getattr(self.cfg, "dual_camera_near_clip_m", 0.1)),
-                    float(getattr(self.cfg, "dual_camera_far_clip_m", 40.0)),
-                )
-                self.cfg.tiled_camera_left.spawn.clipping_range = clip_range
-                self.cfg.tiled_camera_right.spawn.clipping_range = clip_range
 
                 hfov_rad = math.radians(float(self.cfg.dual_camera_hfov_deg))
                 for camera_cfg in (self.cfg.tiled_camera_left, self.cfg.tiled_camera_right):
@@ -1221,8 +1119,6 @@ class ForkliftPalletInsertLiftEnv(DirectRLEnv):
         self._fix_lift_joint_drive()
 
         # ground
-        if bool(getattr(self.cfg, "auto_expand_ground_for_env_grid", True)):
-            _ensure_ground_plane_covers_env_grid(self.cfg)
         _spawn_ground_plane_with_fallback(prim_path="/World/ground", cfg=self.cfg.ground_cfg)
 
         # Render-level isolation for visual multi-env training.
@@ -1252,99 +1148,6 @@ class ForkliftPalletInsertLiftEnv(DirectRLEnv):
         # lights
         light_cfg = sim_utils.DomeLightCfg(intensity=2000.0, color=(0.75, 0.75, 0.75))
         light_cfg.func("/World/Light", light_cfg)
-
-    def _camera_local_pos_to_m(self, values: tuple[float, float, float]) -> torch.Tensor:
-        """Convert configured forklift local camera offsets to simulation meters."""
-        pos = torch.tensor(values, dtype=torch.float32, device=self.device)
-        if torch.max(torch.abs(pos)).item() > 10.0:
-            pos = pos * 0.01
-        return pos
-
-    def _sync_dual_camera_poses(
-        self,
-        env_ids: torch.Tensor | None = None,
-        root_pos: torch.Tensor | None = None,
-        root_quat: torch.Tensor | None = None,
-    ) -> None:
-        """Keep USD camera prims attached to the PhysX forklift root pose before rendering."""
-        if not self._camera_initialized or not self._dual_camera_enabled:
-            return
-        if self._camera_left is None or self._camera_right is None:
-            return
-        if env_ids is None:
-            env_ids = torch.arange(self.num_envs, dtype=torch.long, device=self.device)
-            base_pos = self.robot.data.root_pos_w
-            base_quat = self.robot.data.root_quat_w
-        else:
-            env_ids = env_ids.to(device=self.device, dtype=torch.long)
-            base_pos = self.robot.data.root_pos_w[env_ids] if root_pos is None else root_pos
-            base_quat = self.robot.data.root_quat_w[env_ids] if root_quat is None else root_quat
-
-        left_pos_l = self._camera_local_pos_to_m(tuple(float(v) for v in self.cfg.dual_camera_left_pos_local))
-        right_pos_l = self._camera_local_pos_to_m(tuple(float(v) for v in self.cfg.dual_camera_right_pos_local))
-        left_quat_l = torch.tensor(
-            _quat_from_rpy_deg(*self.cfg.dual_camera_left_rpy_local_deg),
-            dtype=torch.float32,
-            device=self.device,
-        )
-        right_quat_l = torch.tensor(
-            _quat_from_rpy_deg(*self.cfg.dual_camera_right_rpy_local_deg),
-            dtype=torch.float32,
-            device=self.device,
-        )
-
-        left_pos_w = base_pos + quat_apply(base_quat, left_pos_l.expand_as(base_pos))
-        right_pos_w = base_pos + quat_apply(base_quat, right_pos_l.expand_as(base_pos))
-        left_quat_w = quat_mul(base_quat, left_quat_l.expand_as(base_quat))
-        right_quat_w = quat_mul(base_quat, right_quat_l.expand_as(base_quat))
-        self._camera_left.set_world_poses(left_pos_w, left_quat_w, env_ids=env_ids, convention="world")
-        self._camera_right.set_world_poses(right_pos_w, right_quat_w, env_ids=env_ids, convention="world")
-
-    def step(self, action: torch.Tensor):
-        """Step the env while syncing body-mounted RTX cameras before every render."""
-        if bool(getattr(self.cfg, "legacy_direct_step_enable", False)):
-            return super().step(action)
-
-        action = action.to(self.device)
-        if self.cfg.action_noise_model:
-            action = self._action_noise_model(action)
-
-        self._pre_physics_step(action)
-        is_rendering = self.sim.has_gui() or self.sim.has_rtx_sensors()
-
-        for _ in range(self.cfg.decimation):
-            self._sim_step_counter += 1
-            self._apply_action()
-            self.scene.write_data_to_sim()
-            self.sim.step(render=False)
-            if self._sim_step_counter % self.cfg.sim.render_interval == 0 and is_rendering:
-                self._sync_dual_camera_poses()
-                self.sim.render()
-            self.scene.update(dt=self.physics_dt)
-
-        self.episode_length_buf += 1
-        self.common_step_counter += 1
-
-        self.reset_terminated[:], self.reset_time_outs[:] = self._get_dones()
-        self.reset_buf = self.reset_terminated | self.reset_time_outs
-        self.reward_buf = self._get_rewards()
-
-        reset_env_ids = self.reset_buf.nonzero(as_tuple=False).squeeze(-1)
-        if len(reset_env_ids) > 0:
-            self._reset_idx(reset_env_ids)
-            if self.sim.has_rtx_sensors() and self.cfg.rerender_on_reset:
-                self._sync_dual_camera_poses(reset_env_ids)
-                self.sim.render()
-
-        if self.cfg.events:
-            if "interval" in self.event_manager.available_modes:
-                self.event_manager.apply(mode="interval", dt=self.step_dt)
-
-        self.obs_buf = self._get_observations()
-        if self.cfg.observation_noise_model:
-            self.obs_buf["policy"] = self._observation_noise_model(self.obs_buf["policy"])
-
-        return self.obs_buf, self.reward_buf, self.reset_terminated, self.reset_time_outs, self.extras
 
     # ---------------------------
     # Actions
@@ -1405,35 +1208,25 @@ class ForkliftPalletInsertLiftEnv(DirectRLEnv):
         rel_fc = fork_center[:, :2] - pallet_pos[:, :2]
         center_y_signed = torch.sum(rel_fc * v_lat, dim=-1)
         center_y_err = torch.abs(center_y_signed)
-        tip_y_signed = torch.sum(rel_tip * v_lat, dim=-1)
-        tip_y_err = torch.abs(tip_y_signed)
+        tip_y_err = torch.abs(torch.sum(rel_tip * v_lat, dim=-1))
         misaligned = (
             (center_y_err >= self.cfg.preinsert_action_guard_center_m)
             | (tip_y_err >= self.cfg.preinsert_action_guard_tip_m)
             | (yaw_err_deg >= self.cfg.preinsert_action_guard_yaw_deg)
         )
         eligible = misaligned & (insert_norm < self.cfg.preinsert_action_guard_insert_frac_max)
-        lateral_sign = str(getattr(self.cfg, "preinsert_action_guard_lateral_sign", "any"))
-        lateral_min = abs(float(getattr(self.cfg, "preinsert_action_guard_lateral_sign_min_m", 0.0)))
-        if lateral_sign == "positive":
-            eligible = eligible & (center_y_signed >= lateral_min)
-        elif lateral_sign == "negative":
-            eligible = eligible & (center_y_signed <= -lateral_min)
         if bool(self.cfg.preinsert_action_guard_initial_near_hard_only):
             eligible = eligible & self._debug_near_hard_curriculum.bool()
-        if bool(getattr(self.cfg, "preinsert_action_guard_opposite_yaw_only", False)):
-            eligible = eligible & ((center_y_signed * yaw_err_signed) < 0.0)
         can_enter = eligible
         if bool(self.cfg.preinsert_action_guard_once_per_episode):
             can_enter = can_enter & (~self._preinsert_action_guard_used)
 
         enter = can_enter & (dist_front < self.cfg.preinsert_action_guard_trigger_dist_m)
         release = (
-            (dist_front >= self.cfg.preinsert_action_guard_release_dist_m)
+            (~eligible)
+            | (dist_front >= self.cfg.preinsert_action_guard_release_dist_m)
             | (insert_norm >= self.cfg.preinsert_action_guard_insert_frac_max)
         )
-        if bool(getattr(self.cfg, "preinsert_action_guard_release_on_not_eligible", True)):
-            release = release | (~eligible)
         max_guard_steps = int(self.cfg.preinsert_action_guard_max_steps)
         if max_guard_steps > 0:
             release = release | (self._preinsert_action_guard_steps >= max_guard_steps)
@@ -1472,24 +1265,15 @@ class ForkliftPalletInsertLiftEnv(DirectRLEnv):
                 center_y_signed
                 / max(float(self.cfg.preinsert_action_guard_center_m), 1e-6)
             ) * float(self.cfg.preinsert_action_guard_center_steer_weight)
-            tip_term = (
-                tip_y_signed
-                / max(float(self.cfg.preinsert_action_guard_tip_m), 1e-6)
-            ) * float(getattr(self.cfg, "preinsert_action_guard_tip_steer_weight", 0.0))
             yaw_term = (
                 yaw_err_signed
                 / max(float(self.cfg.preinsert_action_guard_yaw_deg) * math.pi / 180.0, 1e-6)
             ) * float(self.cfg.preinsert_action_guard_yaw_steer_weight)
-            steer_signal = center_term + tip_term + yaw_term
-            steer_sign = -torch.sign(steer_signal)
-            if (
-                bool(self.cfg.preinsert_action_guard_force_reverse)
-                and bool(getattr(self.cfg, "preinsert_action_guard_reverse_steer_flip", True))
-            ):
-                steer_sign = -steer_sign
-            steer_cmd = steer_sign * abs(float(self.cfg.preinsert_action_guard_steer_action))
+            steer_cmd = -torch.sign(center_term + yaw_term) * abs(
+                float(self.cfg.preinsert_action_guard_steer_action)
+            )
             steer_cmd = torch.where(
-                torch.abs(steer_signal) > 1e-6,
+                torch.abs(center_term + yaw_term) > 1e-6,
                 steer_cmd,
                 torch.zeros_like(steer_cmd),
             )
@@ -2178,9 +1962,6 @@ class ForkliftPalletInsertLiftEnv(DirectRLEnv):
         if not self._camera_initialized or self._camera is None:
             raise RuntimeError("[camera] camera requested but not initialized")
 
-        # Camera poses are synced immediately before scheduled renders in step().
-        # Observation reads must remain a pure buffer read; writing camera poses
-        # here can race the RTX sensor stack during reset-heavy training.
         return self._normalize_camera_rgb(self._camera.data.output["rgb"], h, w, "single")
 
     def _get_dual_camera_images(self) -> tuple[torch.Tensor, torch.Tensor]:
@@ -2193,9 +1974,6 @@ class ForkliftPalletInsertLiftEnv(DirectRLEnv):
             or self._camera_right is None
         ):
             raise RuntimeError("[camera:dual] dual cameras requested but not initialized")
-        # Camera poses are synced immediately before scheduled renders in step().
-        # Observation reads must remain a pure buffer read; writing camera poses
-        # here can race the RTX sensor stack during reset-heavy training.
         left = self._normalize_camera_rgb(self._camera_left.data.output["rgb"], h, w, "left")
         right = self._normalize_camera_rgb(self._camera_right.data.output["rgb"], h, w, "right")
         return left, right
@@ -2653,8 +2431,7 @@ class ForkliftPalletInsertLiftEnv(DirectRLEnv):
         rel_tip = tip[:, :2] - pallet_pos[:, :2]
         s_tip = torch.sum(rel_tip * u_in, dim=-1)
         rel_fc = fork_center[:, :2] - pallet_pos[:, :2]
-        center_y_signed = torch.sum(rel_fc * v_lat, dim=-1)
-        center_y_err = torch.abs(center_y_signed)
+        center_y_err = torch.abs(torch.sum(rel_fc * v_lat, dim=-1))
         s_front = -0.5 * self.cfg.pallet_depth_m
 
         dist_front = torch.clamp(s_front - s_tip, min=0.0)
@@ -3227,8 +3004,7 @@ class ForkliftPalletInsertLiftEnv(DirectRLEnv):
         s_tip = torch.sum(rel_tip * u_in, dim=-1)
 
         rel_fc = fork_center[:, :2] - pallet_pos[:, :2]
-        center_y_signed = torch.sum(rel_fc * v_lat, dim=-1)
-        center_y_err = torch.abs(center_y_signed)
+        center_y_err = torch.abs(torch.sum(rel_fc * v_lat, dim=-1))
         s_front = -0.5 * self.cfg.pallet_depth_m
 
         rel_base_axis = root_pos[:, :2] - pallet_pos[:, :2]
@@ -3294,19 +3070,6 @@ class ForkliftPalletInsertLiftEnv(DirectRLEnv):
             pushfree_curriculum = smoothstep(curriculum_raw)
         else:
             pushfree_curriculum = torch.tensor(1.0, device=self.device)
-        if bool(getattr(self.cfg, "progress_teacher_recovery_curriculum_enable", False)):
-            recovery_start = float(getattr(self.cfg, "progress_teacher_recovery_curriculum_start_step", 0))
-            recovery_ramp = max(
-                float(getattr(self.cfg, "progress_teacher_recovery_curriculum_ramp_steps", 1)),
-                1.0,
-            )
-            recovery_raw = torch.tensor(
-                (float(self.common_step_counter) - recovery_start) / recovery_ramp,
-                device=self.device,
-            )
-            recovery_curriculum = smoothstep(recovery_raw)
-        else:
-            recovery_curriculum = torch.tensor(1.0, device=self.device)
         push_sigma_m = (
             float(getattr(self.cfg, "progress_teacher_push_sigma_start_m", 0.14))
             + (
@@ -3416,7 +3179,6 @@ class ForkliftPalletInsertLiftEnv(DirectRLEnv):
         ) * clean_gate
         commit_active = (insert_norm < 1.0).float()
         forward_action = torch.clamp(self.actions[:, 0], min=0.0, max=1.0)
-        reverse_action = torch.clamp(-self.actions[:, 0], min=0.0, max=1.0)
 
         r_approach = (
             float(getattr(self.cfg, "progress_teacher_approach_weight", 8.0))
@@ -3466,83 +3228,33 @@ class ForkliftPalletInsertLiftEnv(DirectRLEnv):
             * clean_gate
             * approach_active
         )
+        near_align_progress_weight = float(
+            getattr(self.cfg, "progress_teacher_near_align_progress_weight", 0.0)
+        )
+        if bool(getattr(self.cfg, "progress_teacher_near_align_curriculum_enable", False)):
+            near_align_start = float(
+                getattr(self.cfg, "progress_teacher_near_align_curriculum_start_step", 0.0)
+            )
+            near_align_ramp = max(
+                float(getattr(self.cfg, "progress_teacher_near_align_curriculum_ramp_steps", 1.0)),
+                1.0,
+            )
+            near_align_progress_weight *= float(
+                smoothstep(
+                    torch.tensor(
+                        (float(self.common_step_counter) - near_align_start) / near_align_ramp,
+                        device=self.device,
+                    )
+                ).item()
+            )
         r_near_align_progress = (
-            float(getattr(self.cfg, "progress_teacher_near_align_progress_weight", 0.0))
+            near_align_progress_weight
             * near_gate
             * approach_active
             * push_gate
             * clean_gate
             * (center_y_delta + tip_y_delta)
-            * recovery_curriculum
         )
-        curve_guidance_reward = torch.zeros((self.num_envs,), device=self.device)
-        curve_guidance_score = torch.zeros((self.num_envs,), device=self.device)
-        curve_guidance_delta = torch.zeros((self.num_envs,), device=self.device)
-        curve_guidance_gate = torch.zeros((self.num_envs,), device=self.device)
-        curve_d_traj = torch.zeros((self.num_envs,), device=self.device)
-        curve_yaw_err_deg = torch.zeros((self.num_envs,), device=self.device)
-        curve_s_norm = torch.zeros((self.num_envs,), device=self.device)
-        if bool(getattr(self.cfg, "progress_teacher_curve_guidance_enable", False)):
-            curve_d_traj, curve_yaw_err_deg, curve_s_norm = self._query_reference_trajectory()
-            curve_dist_score = torch.exp(
-                -(
-                    curve_d_traj
-                    / max(float(getattr(self.cfg, "progress_teacher_curve_distance_sigma_m", 0.35)), 1e-6)
-                )
-                ** 2
-            )
-            curve_yaw_score = torch.exp(
-                -(
-                    curve_yaw_err_deg
-                    / max(float(getattr(self.cfg, "progress_teacher_curve_yaw_sigma_deg", 15.0)), 1e-6)
-                )
-                ** 2
-            )
-            curve_guidance_gate = smoothstep(
-                (
-                    float(getattr(self.cfg, "progress_teacher_curve_near_gate_m", 2.2))
-                    - stage_dist_front
-                )
-                / max(float(getattr(self.cfg, "progress_teacher_curve_near_gate_ramp_m", 0.8)), 1e-6)
-            )
-            curve_guidance_score = (
-                curve_dist_score
-                * curve_yaw_score
-                * curve_guidance_gate
-                * approach_active
-                * push_gate
-                * clean_gate
-            )
-            curve_guidance_delta = torch.clamp(
-                curve_guidance_score - self._prev_progress_curve_score,
-                min=-0.25,
-                max=0.25,
-            )
-            curve_progress_delta = torch.clamp(
-                curve_s_norm - self._prev_phi_traj,
-                min=0.0,
-                max=0.05,
-            )
-            curve_guidance_reward = recovery_curriculum * (
-                float(getattr(self.cfg, "progress_teacher_curve_guidance_weight", 0.0))
-                * torch.clamp(curve_guidance_delta, min=0.0)
-                + float(getattr(self.cfg, "progress_teacher_curve_progress_weight", 0.0))
-                * curve_progress_delta
-                * curve_guidance_score
-            )
-        forward_insert_gate = torch.ones((self.num_envs,), device=self.device)
-        if bool(getattr(self.cfg, "progress_teacher_forward_reward_requires_insert_progress", False)):
-            insert_progress_start = float(
-                getattr(self.cfg, "progress_teacher_forward_insert_progress_start_norm", 0.0005)
-            )
-            insert_progress_ramp = max(
-                float(getattr(self.cfg, "progress_teacher_forward_insert_progress_ramp_norm", 0.0030)),
-                1e-6,
-            )
-            forward_insert_gate = smoothstep((insert_delta - insert_progress_start) / insert_progress_ramp)
-            r_commit_progress = r_commit_progress * forward_insert_gate
-            r_commit_forward = r_commit_forward * forward_insert_gate
-            r_aligned_approach_progress = r_aligned_approach_progress * forward_insert_gate
         min_commit_forward = float(getattr(self.cfg, "progress_teacher_min_commit_forward_action", 0.25))
         not_committing = torch.clamp(
             (min_commit_forward - self.actions[:, 0]) / max(min_commit_forward, 1e-6),
@@ -3572,41 +3284,6 @@ class ForkliftPalletInsertLiftEnv(DirectRLEnv):
             * push_gate
             * clean_gate
         )
-        close_noinsert_gate = torch.zeros((self.num_envs,), device=self.device)
-        close_noinsert_positive_scale = torch.ones((self.num_envs,), device=self.device)
-        close_noinsert_commit_scale = torch.ones((self.num_envs,), device=self.device)
-        close_noinsert_penalty = torch.zeros((self.num_envs,), device=self.device)
-        if bool(getattr(self.cfg, "progress_teacher_close_noinsert_gate_enable", False)):
-            close_dist_m = max(
-                float(getattr(self.cfg, "progress_teacher_close_noinsert_gate_dist_m", 0.55)),
-                1e-6,
-            )
-            insert_start = float(getattr(self.cfg, "progress_teacher_close_noinsert_insert_start_norm", 0.03))
-            insert_ramp = max(
-                float(getattr(self.cfg, "progress_teacher_close_noinsert_insert_ramp_norm", 0.12)),
-                1e-6,
-            )
-            close_gate = smoothstep((close_dist_m - stage_dist_front) / close_dist_m)
-            no_insert_gate = 1.0 - smoothstep((insert_norm - insert_start) / insert_ramp)
-            close_noinsert_gate = close_gate * no_insert_gate * approach_active * clean_gate * recovery_curriculum
-            positive_floor = max(
-                0.0,
-                min(1.0, float(getattr(self.cfg, "progress_teacher_close_noinsert_positive_floor", 0.15))),
-            )
-            commit_floor = max(
-                0.0,
-                min(1.0, float(getattr(self.cfg, "progress_teacher_close_noinsert_commit_floor", 0.35))),
-            )
-            close_noinsert_positive_scale = 1.0 - close_noinsert_gate * (1.0 - positive_floor)
-            close_noinsert_commit_scale = 1.0 - close_noinsert_gate * (1.0 - commit_floor)
-            close_noinsert_penalty = (
-                -float(getattr(self.cfg, "progress_teacher_close_noinsert_penalty_weight", 0.0))
-                * close_noinsert_gate
-            )
-            r_approach = r_approach * close_noinsert_positive_scale
-            r_aligned_approach_progress = r_aligned_approach_progress * close_noinsert_positive_scale
-            align_potential = align_potential * close_noinsert_positive_scale
-            r_commit_progress = r_commit_progress * close_noinsert_commit_scale
 
         action_penalty = (
             float(getattr(self.cfg, "progress_teacher_action_l2", -0.01))
@@ -3650,39 +3327,6 @@ class ForkliftPalletInsertLiftEnv(DirectRLEnv):
             * dirty_insert_excess
             * dirty_insert_active
         )
-        misaligned_insert_penalty = torch.zeros((self.num_envs,), device=self.device)
-        if bool(getattr(self.cfg, "progress_teacher_misaligned_insert_penalty_enable", False)):
-            insert_start = float(getattr(self.cfg, "progress_teacher_misaligned_insert_start_norm", 0.05))
-            insert_ramp = max(
-                float(getattr(self.cfg, "progress_teacher_misaligned_insert_ramp_norm", 0.12)),
-                1e-6,
-            )
-            center_tol = max(
-                float(getattr(self.cfg, "progress_teacher_misaligned_insert_center_m", 0.18)),
-                1e-6,
-            )
-            tip_tol = max(
-                float(getattr(self.cfg, "progress_teacher_misaligned_insert_tip_m", 0.16)),
-                1e-6,
-            )
-            yaw_tol = max(
-                float(getattr(self.cfg, "progress_teacher_misaligned_insert_yaw_deg", 8.0)),
-                1e-6,
-            )
-            insert_active_gate = smoothstep((insert_norm - insert_start) / insert_ramp)
-            insert_misalignment_score = torch.clamp(
-                torch.clamp(center_y_err - center_tol, min=0.0) / center_tol
-                + torch.clamp(tip_y_err - tip_tol, min=0.0) / tip_tol
-                + torch.clamp(yaw_err_deg - yaw_tol, min=0.0) / yaw_tol,
-                max=1.0,
-            )
-            misaligned_insert_penalty = (
-                -float(getattr(self.cfg, "progress_teacher_misaligned_insert_penalty_weight", 0.0))
-                * insert_active_gate
-                * insert_misalignment_score
-                * push_gate
-                * clean_gate
-            )
         misaligned_forward_penalty = torch.zeros((self.num_envs,), device=self.device)
         if bool(getattr(self.cfg, "progress_teacher_misaligned_forward_penalty_enable", False)):
             near_forward_zone = smoothstep(
@@ -3711,144 +3355,6 @@ class ForkliftPalletInsertLiftEnv(DirectRLEnv):
                 * near_forward_zone
                 * approach_active
                 * misalignment_score
-            )
-        reverse_drive_penalty = torch.zeros((self.num_envs,), device=self.device)
-        if bool(getattr(self.cfg, "progress_teacher_reverse_drive_penalty_enable", False)):
-            reverse_dist_gate = smoothstep(
-                (
-                    stage_dist_front
-                    - float(getattr(self.cfg, "progress_teacher_reverse_drive_penalty_min_dist_m", 0.18))
-                )
-                / max(
-                    float(getattr(self.cfg, "progress_teacher_reverse_drive_penalty_ramp_m", 0.45)),
-                    1e-6,
-                )
-            )
-            reverse_drive_penalty = (
-                -float(getattr(self.cfg, "progress_teacher_reverse_drive_penalty_weight", 0.0))
-                * reverse_action
-                * approach_active
-                * reverse_dist_gate
-                * push_gate
-                * clean_gate
-            )
-        steer_sign_reward = torch.zeros((self.num_envs,), device=self.device)
-        steer_wrong_sign_penalty = torch.zeros((self.num_envs,), device=self.device)
-        steer_sign_idle_penalty = torch.zeros((self.num_envs,), device=self.device)
-        steer_sign_gate = torch.zeros((self.num_envs,), device=self.device)
-        steer_sign_correct = torch.zeros((self.num_envs,), device=self.device)
-        steer_sign_wrong = torch.zeros((self.num_envs,), device=self.device)
-        steer_sign_signal_abs = torch.zeros((self.num_envs,), device=self.device)
-        steer_sign_reward_gate = torch.ones((self.num_envs,), device=self.device)
-        if bool(getattr(self.cfg, "progress_teacher_steer_sign_reward_enable", False)):
-            steer = torch.clamp(self.actions[:, 1], min=-1.0, max=1.0)
-            center_scale = max(
-                float(getattr(self.cfg, "progress_teacher_steer_sign_center_scale_m", 0.35)),
-                1e-6,
-            )
-            tip_scale = max(
-                float(getattr(self.cfg, "progress_teacher_steer_sign_tip_scale_m", 0.45)),
-                1e-6,
-            )
-            yaw_scale_rad = max(
-                float(getattr(self.cfg, "progress_teacher_steer_sign_yaw_scale_deg", 12.0))
-                * math.pi
-                / 180.0,
-                1e-6,
-            )
-            steer_need = (
-                float(getattr(self.cfg, "progress_teacher_steer_sign_center_weight", 1.0))
-                * center_y_signed
-                / center_scale
-                + float(getattr(self.cfg, "progress_teacher_steer_sign_tip_weight", 0.45))
-                * tip_y_signed
-                / tip_scale
-                + float(getattr(self.cfg, "progress_teacher_steer_sign_yaw_weight", 0.35))
-                * yaw_err
-                / yaw_scale_rad
-            )
-            steer_sign_signal_abs = torch.abs(steer_need)
-            signal_deadband = float(getattr(self.cfg, "progress_teacher_steer_sign_deadband", 0.08))
-            signal_ramp = max(float(getattr(self.cfg, "progress_teacher_steer_sign_ramp", 0.35)), 1e-6)
-            signal_gate = smoothstep((steer_sign_signal_abs - signal_deadband) / signal_ramp)
-            near_sign_gate = smoothstep(
-                (
-                    float(getattr(self.cfg, "progress_teacher_steer_sign_near_m", 0.95))
-                    - stage_dist_front
-                )
-                / max(float(getattr(self.cfg, "progress_teacher_steer_sign_near_ramp_m", 0.75)), 1e-6)
-            )
-            preinsert_sign_gate = (
-                insert_norm
-                <= float(getattr(self.cfg, "progress_teacher_steer_sign_stop_insert_norm", 0.35))
-            ).float()
-            min_abs_steer = float(getattr(self.cfg, "progress_teacher_steer_sign_min_abs_action", 0.02))
-            steer_active = smoothstep((torch.abs(steer) - min_abs_steer) / max(min_abs_steer, 1e-6))
-            desired_alignment = -steer * torch.sign(steer_need)
-            steer_sign_correct = torch.clamp(desired_alignment, min=0.0)
-            steer_sign_wrong = torch.clamp(-desired_alignment, min=0.0) * steer_active
-            steer_sign_gate = (
-                signal_gate
-                * near_sign_gate
-                * preinsert_sign_gate
-                * push_gate
-                * clean_gate
-                * recovery_curriculum
-            )
-            if bool(getattr(self.cfg, "progress_teacher_steer_sign_reward_requires_approach", False)):
-                drive_min = float(getattr(self.cfg, "progress_teacher_steer_sign_reward_drive_min", -0.02))
-                drive_ramp = max(
-                    float(getattr(self.cfg, "progress_teacher_steer_sign_reward_drive_ramp", 0.16)),
-                    1e-6,
-                )
-                non_reverse_gate = smoothstep((self.actions[:, 0] - drive_min) / drive_ramp)
-                progress_min = float(
-                    getattr(self.cfg, "progress_teacher_steer_sign_reward_progress_min", 0.0002)
-                )
-                progress_ramp = max(
-                    float(getattr(self.cfg, "progress_teacher_steer_sign_reward_progress_ramp", 0.004)),
-                    1e-6,
-                )
-                progress_gate = smoothstep((dist_delta - progress_min) / progress_ramp)
-                away_start = float(
-                    getattr(self.cfg, "progress_teacher_steer_sign_reward_away_start", 0.0005)
-                )
-                away_ramp = max(
-                    float(getattr(self.cfg, "progress_teacher_steer_sign_reward_away_ramp", 0.006)),
-                    1e-6,
-                )
-                not_away_gate = 1.0 - smoothstep((dist_increase - away_start) / away_ramp)
-                reward_gate_floor = max(
-                    0.0,
-                    min(
-                        1.0,
-                        float(getattr(self.cfg, "progress_teacher_steer_sign_reward_gate_floor", 0.05)),
-                    ),
-                )
-                steer_sign_reward_gate = (
-                    reward_gate_floor
-                    + (1.0 - reward_gate_floor)
-                    * non_reverse_gate
-                    * progress_gate
-                    * not_away_gate
-                )
-            steer_sign_reward = (
-                float(getattr(self.cfg, "progress_teacher_steer_sign_weight", 0.20))
-                * steer_sign_gate
-                * steer_sign_correct
-                * steer_sign_reward_gate
-            )
-            if bool(getattr(self.cfg, "progress_teacher_close_noinsert_gate_enable", False)):
-                steer_sign_reward = steer_sign_reward * close_noinsert_positive_scale
-            steer_wrong_sign_penalty = (
-                -float(getattr(self.cfg, "progress_teacher_steer_wrong_sign_penalty_weight", 0.35))
-                * steer_sign_gate
-                * steer_sign_wrong
-            )
-            steer_sign_idle_penalty = (
-                -float(getattr(self.cfg, "progress_teacher_steer_sign_idle_penalty_weight", 0.0))
-                * steer_sign_gate
-                * (1.0 - steer_active)
             )
         if bool(getattr(self.cfg, "preinsert_push_termination_enable", False)):
             preinsert_push_mask = (
@@ -3933,49 +3439,6 @@ class ForkliftPalletInsertLiftEnv(DirectRLEnv):
             max=1.0,
         )
         r_hold_progress = float(getattr(self.cfg, "progress_teacher_hold_weight", 20.0)) * hold_delta
-        hold_frac = torch.clamp(self._hold_counter / float(self._hold_steps), min=0.0, max=1.0)
-        hold_drop_frac = torch.clamp(
-            (hold_counter_prev - self._hold_counter) / float(self._hold_steps),
-            min=0.0,
-            max=1.0,
-        )
-        r_stable_insert = (
-            float(getattr(self.cfg, "progress_teacher_stable_insert_weight", 0.0))
-            * still_ok.float()
-            * push_gate
-            * clean_gate
-        )
-        r_hold_alive = (
-            float(getattr(self.cfg, "progress_teacher_hold_alive_weight", 0.0))
-            * hold_frac
-            * still_ok.float()
-            * push_gate
-            * clean_gate
-        )
-        hold_drop_penalty = (
-            -float(getattr(self.cfg, "progress_teacher_hold_drop_penalty_weight", 0.0))
-            * hold_drop_frac
-        )
-        far_noinsert_penalty = torch.zeros((self.num_envs,), device=self.device)
-        if bool(getattr(self.cfg, "progress_teacher_far_noinsert_penalty_enable", False)):
-            far_dist = max(float(getattr(self.cfg, "progress_teacher_far_noinsert_dist_m", 0.34)), 1e-6)
-            far_ramp = max(float(getattr(self.cfg, "progress_teacher_far_noinsert_ramp_m", 0.20)), 1e-6)
-            step_start = float(getattr(self.cfg, "progress_teacher_far_noinsert_start_step", 90.0))
-            step_ramp = max(float(getattr(self.cfg, "progress_teacher_far_noinsert_step_ramp", 90.0)), 1e-6)
-            insert_start = float(getattr(self.cfg, "progress_teacher_far_noinsert_insert_start_norm", 0.08))
-            insert_ramp = max(float(getattr(self.cfg, "progress_teacher_far_noinsert_insert_ramp_norm", 0.12)), 1e-6)
-            far_gate = smoothstep((stage_dist_front - far_dist) / far_ramp)
-            mature_gate = smoothstep((self.episode_length_buf.float() - step_start) / step_ramp)
-            no_insert_gate = 1.0 - smoothstep((insert_norm - insert_start) / insert_ramp)
-            far_noinsert_penalty = (
-                -float(getattr(self.cfg, "progress_teacher_far_noinsert_penalty_weight", 0.0))
-                * far_gate
-                * mature_gate
-                * no_insert_gate
-                * approach_active
-                * clean_gate
-                * recovery_curriculum
-            )
 
         time_ratio = self.episode_length_buf.float() / (self.max_episode_length + 1e-6)
         time_bonus = self.cfg.rew_success_time * (1.0 - time_ratio)
@@ -3998,29 +3461,18 @@ class ForkliftPalletInsertLiftEnv(DirectRLEnv):
             + r_commit_forward
             + r_aligned_approach_progress
             + r_near_align_progress
-            + curve_guidance_reward
             + mouth_stall_penalty
             + align_potential
             + insert_potential
             + r_hold_progress
-            + r_stable_insert
-            + r_hold_alive
-            + hold_drop_penalty
-            + far_noinsert_penalty
             + r_terminal
             + action_penalty
             + time_penalty
             + distance_penalty
             + push_penalty
             + dirty_insert_penalty
-            + misaligned_insert_penalty
-            + close_noinsert_penalty
             + r_dirty_insert_event_termination
             + misaligned_forward_penalty
-            + reverse_drive_penalty
-            + steer_sign_reward
-            + steer_wrong_sign_penalty
-            + steer_sign_idle_penalty
             + r_preinsert_push_termination
             + r_dirty_push_termination
         )
@@ -4032,9 +3484,6 @@ class ForkliftPalletInsertLiftEnv(DirectRLEnv):
         self._prev_tip_axis = s_tip.detach()
         self._prev_yaw_err_deg = yaw_err_deg.detach()
         self._prev_insert_norm = insert_norm.detach()
-        if bool(getattr(self.cfg, "progress_teacher_curve_guidance_enable", False)):
-            self._prev_progress_curve_score = curve_guidance_score.detach()
-            self._prev_phi_traj = curve_s_norm.detach()
         self._prev_dist_front = dist_front_tip.detach()
         self._prev_lift_height = lift_height.detach()
         self._is_first_step[:] = False
@@ -4054,44 +3503,18 @@ class ForkliftPalletInsertLiftEnv(DirectRLEnv):
         self.extras["log"]["progress_teacher/r_commit_forward"] = r_commit_forward.mean()
         self.extras["log"]["progress_teacher/r_aligned_approach_progress"] = r_aligned_approach_progress.mean()
         self.extras["log"]["progress_teacher/r_near_align_progress"] = r_near_align_progress.mean()
-        self.extras["log"]["progress_teacher/recovery_curriculum"] = recovery_curriculum
-        self.extras["log"]["progress_teacher/r_curve_guidance"] = curve_guidance_reward.mean()
-        self.extras["log"]["progress_teacher/curve_guidance_score"] = curve_guidance_score.mean()
-        self.extras["log"]["progress_teacher/curve_guidance_delta"] = curve_guidance_delta.mean()
-        self.extras["log"]["progress_teacher/curve_guidance_gate"] = curve_guidance_gate.mean()
-        self.extras["log"]["progress_teacher/curve_d_traj"] = curve_d_traj.mean()
-        self.extras["log"]["progress_teacher/curve_yaw_err_deg"] = curve_yaw_err_deg.mean()
-        self.extras["log"]["progress_teacher/curve_s_norm"] = curve_s_norm.mean()
         self.extras["log"]["progress_teacher/mouth_stall_penalty"] = mouth_stall_penalty.mean()
         self.extras["log"]["progress_teacher/align_potential"] = align_potential.mean()
         self.extras["log"]["progress_teacher/insert_potential"] = insert_potential.mean()
         self.extras["log"]["progress_teacher/r_hold_progress"] = r_hold_progress.mean()
-        self.extras["log"]["progress_teacher/r_stable_insert"] = r_stable_insert.mean()
-        self.extras["log"]["progress_teacher/r_hold_alive"] = r_hold_alive.mean()
-        self.extras["log"]["progress_teacher/hold_drop_penalty"] = hold_drop_penalty.mean()
-        self.extras["log"]["progress_teacher/far_noinsert_penalty"] = far_noinsert_penalty.mean()
         self.extras["log"]["progress_teacher/r_terminal"] = r_terminal.mean()
         self.extras["log"]["progress_teacher/action_penalty"] = action_penalty.mean()
         self.extras["log"]["progress_teacher/push_penalty"] = push_penalty.mean()
         self.extras["log"]["progress_teacher/dirty_insert_penalty"] = dirty_insert_penalty.mean()
-        self.extras["log"]["progress_teacher/misaligned_insert_penalty"] = misaligned_insert_penalty.mean()
-        self.extras["log"]["progress_teacher/close_noinsert_penalty"] = close_noinsert_penalty.mean()
-        self.extras["log"]["progress_teacher/close_noinsert_gate"] = close_noinsert_gate.mean()
-        self.extras["log"]["progress_teacher/close_noinsert_positive_scale"] = (
-            close_noinsert_positive_scale.mean()
-        )
-        self.extras["log"]["progress_teacher/close_noinsert_commit_scale"] = (
-            close_noinsert_commit_scale.mean()
-        )
-        self.extras["log"]["progress_teacher/forward_insert_gate"] = forward_insert_gate.mean()
         self.extras["log"]["progress_teacher/dirty_insert_event_term_penalty"] = (
             r_dirty_insert_event_termination.mean()
         )
         self.extras["log"]["progress_teacher/misaligned_forward_penalty"] = misaligned_forward_penalty.mean()
-        self.extras["log"]["progress_teacher/reverse_drive_penalty"] = reverse_drive_penalty.mean()
-        self.extras["log"]["progress_teacher/steer_sign_reward"] = steer_sign_reward.mean()
-        self.extras["log"]["progress_teacher/steer_wrong_sign_penalty"] = steer_wrong_sign_penalty.mean()
-        self.extras["log"]["progress_teacher/steer_sign_idle_penalty"] = steer_sign_idle_penalty.mean()
         self.extras["log"]["progress_teacher/preinsert_push_term_penalty"] = r_preinsert_push_termination.mean()
         self.extras["log"]["progress_teacher/dirty_push_term_penalty"] = r_dirty_push_termination.mean()
         self.extras["log"]["progress_teacher/dist_delta"] = dist_delta.mean()
@@ -4121,26 +3544,6 @@ class ForkliftPalletInsertLiftEnv(DirectRLEnv):
         self.extras["log"]["progress_teacher/dirty_insert_excess"] = dirty_insert_excess.mean()
         self.extras["log"]["progress_teacher/dirty_insert_active"] = dirty_insert_active.mean()
         self.extras["log"]["progress_teacher/success_disp_xy"] = success_disp_xy.mean()
-        self.extras["log"]["diag/steer_sign_gate_mean"] = steer_sign_gate.mean()
-        self.extras["log"]["diag/steer_sign_correct_mean"] = steer_sign_correct.mean()
-        self.extras["log"]["diag/steer_sign_wrong_mean"] = steer_sign_wrong.mean()
-        self.extras["log"]["diag/steer_sign_signal_abs_mean"] = steer_sign_signal_abs.mean()
-        self.extras["log"]["diag/steer_sign_reward_gate_mean"] = steer_sign_reward_gate.mean()
-        self.extras["log"]["curriculum/teacher_reference_reset_frac"] = (
-            self._teacher_reference_reset_active.float().mean()
-        )
-        self.extras["log"]["curriculum/teacher_reference_reset_edge_frac"] = (
-            (self._teacher_reference_reset_phase == 1).float().mean()
-        )
-        self.extras["log"]["curriculum/teacher_reference_reset_mouth_frac"] = (
-            (self._teacher_reference_reset_phase == 2).float().mean()
-        )
-        self.extras["log"]["curriculum/teacher_reference_reset_preinsert_frac"] = (
-            (self._teacher_reference_reset_phase == 3).float().mean()
-        )
-        self.extras["log"]["curriculum/teacher_reference_reset_partial_insert_frac"] = (
-            (self._teacher_reference_reset_phase == 4).float().mean()
-        )
         self.extras["log"]["err/dist_front_mean"] = dist_front_tip.mean()
         self.extras["log"]["err/dist_front_base_mean"] = dist_front_base.mean()
         self.extras["log"]["err/stage_dist_front_mean"] = stage_dist_front.mean()
@@ -4156,8 +3559,6 @@ class ForkliftPalletInsertLiftEnv(DirectRLEnv):
         self.extras["log"]["diag/max_hold_counter_frac"] = (
             self._hold_counter.max() / float(self._hold_steps)
         )
-        self.extras["log"]["diag/hold_frac_mean"] = hold_frac.mean()
-        self.extras["log"]["diag/stable_insert_frac"] = still_ok.float().mean()
         self.extras["log"]["diag/preinsert_push_termination_frac"] = preinsert_push_mask.float().mean()
         self.extras["log"]["diag/dirty_push_termination_frac"] = dirty_push_mask.float().mean()
         self.extras["log"]["diag/progress_teacher_dirty_insert_termination_frac"] = (
@@ -4216,7 +3617,7 @@ class ForkliftPalletInsertLiftEnv(DirectRLEnv):
 
         robot_yaw = _quat_to_yaw(self.robot.data.root_quat_w)               # (N,)
         pallet_yaw = _quat_to_yaw(self.pallet.data.root_quat_w)             # (N,)
-
+        
         # 偏航误差（中心线平行度）
         yaw_err = torch.atan2(
             torch.sin(robot_yaw - pallet_yaw),
@@ -4374,7 +3775,7 @@ class ForkliftPalletInsertLiftEnv(DirectRLEnv):
             success_geom_training = torch.zeros_like(success_geom_training)
 
         # ---- 实验 B: 论文原生 Reward 计算 ----
-
+        
         # 2. 距离 rd 的定义：叉臂中心到当前 family target_center 的距离
         pallet_yaw = _quat_to_yaw(self.pallet.data.root_quat_w)
         dist_center_family, _ = self._exp83_target_center_family_dist(
@@ -6053,8 +5454,6 @@ class ForkliftPalletInsertLiftEnv(DirectRLEnv):
         self._preinsert_action_guard_used[env_ids] = False
         self._preinsert_action_guard_steps[env_ids] = 0
         self._debug_near_hard_curriculum[env_ids] = False
-        self._teacher_reference_reset_active[env_ids] = False
-        self._teacher_reference_reset_phase[env_ids] = 0
         
         # S1.0S Phase-2: 举升里程碑清零
         self._milestone_lift_10cm[env_ids] = False
@@ -6073,14 +5472,7 @@ class ForkliftPalletInsertLiftEnv(DirectRLEnv):
         self._window_filled[env_ids] = False
 
         # ---- 托盘固定位姿（可选：后续可加随机化） ----
-        # The legacy privileged teacher was trained with reset poses written in
-        # world-origin coordinates.  Keep the corrected cloned-env origin path
-        # as the default and make the old behavior explicit for v3.11 recovery.
-        env_origins = torch.zeros((len(env_ids), 3), device=self.device)
-        if not bool(getattr(self.cfg, "legacy_reset_world_origin_enable", False)):
-            env_origins = self.scene.env_origins[env_ids]
-        pallet_pos_local = torch.tensor(self.cfg.pallet_cfg.init_state.pos, device=self.device).repeat(len(env_ids), 1)
-        pallet_pos = pallet_pos_local + env_origins
+        pallet_pos = torch.tensor(self.cfg.pallet_cfg.init_state.pos, device=self.device).repeat(len(env_ids), 1)
         pallet_quat = torch.tensor(self.cfg.pallet_cfg.init_state.rot, device=self.device).repeat(len(env_ids), 1)
         self._write_root_pose(self.pallet, pallet_pos, pallet_quat, env_ids)
         self._pallet_reset_xy_w[env_ids] = pallet_pos[:, :2]
@@ -6130,154 +5522,6 @@ class ForkliftPalletInsertLiftEnv(DirectRLEnv):
                     (len(env_ids), 1),
                     device=self.device,
                 )
-                if bool(getattr(self.cfg, "teacher_reference_reset_enable", False)):
-                    num_reset = len(env_ids)
-                    start = float(getattr(self.cfg, "teacher_reference_reset_start_step", 0))
-                    ramp = max(float(getattr(self.cfg, "teacher_reference_reset_ramp_steps", 1)), 1.0)
-                    mix_start = float(getattr(self.cfg, "teacher_reference_reset_mix_start", 0.85))
-                    mix_end = float(getattr(self.cfg, "teacher_reference_reset_mix_end", 0.30))
-                    mix_t = max(0.0, min(1.0, (float(self.common_step_counter) - start) / ramp))
-                    mix_prob = mix_start + (mix_end - mix_start) * mix_t
-                    ref_mask = (
-                        torch.rand((num_reset, 1), device=self.device)
-                        < max(0.0, min(1.0, mix_prob))
-                    )
-                    ref_count = int(ref_mask.sum().item())
-                    if ref_count > 0:
-                        phase_rand = torch.rand((num_reset, 1), device=self.device)
-                        edge_p = max(0.0, float(getattr(self.cfg, "teacher_reference_edge_phase_prob", 0.20)))
-                        mouth_p = max(0.0, float(getattr(self.cfg, "teacher_reference_mouth_phase_prob", 0.30)))
-                        preinsert_p = max(
-                            0.0,
-                            float(getattr(self.cfg, "teacher_reference_preinsert_phase_prob", 0.30)),
-                        )
-                        partial_p = max(
-                            0.0,
-                            float(getattr(self.cfg, "teacher_reference_partial_insert_phase_prob", 0.20)),
-                        )
-                        total_p = max(edge_p + mouth_p + preinsert_p + partial_p, 1e-6)
-                        edge_cut = edge_p / total_p
-                        mouth_cut = (edge_p + mouth_p) / total_p
-                        preinsert_cut = (edge_p + mouth_p + preinsert_p) / total_p
-                        phase = torch.ones((num_reset, 1), dtype=torch.int32, device=self.device)
-                        phase = torch.where(
-                            phase_rand < edge_cut,
-                            torch.full_like(phase, 1),
-                            phase,
-                        )
-                        phase = torch.where(
-                            (phase_rand >= edge_cut) & (phase_rand < mouth_cut),
-                            torch.full_like(phase, 2),
-                            phase,
-                        )
-                        phase = torch.where(
-                            (phase_rand >= mouth_cut) & (phase_rand < preinsert_cut),
-                            torch.full_like(phase, 3),
-                            phase,
-                        )
-                        phase = torch.where(
-                            phase_rand >= preinsert_cut,
-                            torch.full_like(phase, 4),
-                            phase,
-                        )
-
-                        x_ref = torch.empty((num_reset, 1), device=self.device)
-                        y_ref = torch.empty((num_reset, 1), device=self.device)
-                        yaw_ref = torch.empty((num_reset, 1), device=self.device)
-                        edge_mask = phase == 1
-                        mouth_mask = phase == 2
-                        preinsert_mask = phase == 3
-                        partial_mask = phase == 4
-                        x_ref[edge_mask] = sample_uniform(
-                            float(getattr(self.cfg, "teacher_reference_edge_x_min_m", -3.95)),
-                            float(getattr(self.cfg, "teacher_reference_edge_x_max_m", -3.55)),
-                            (int(edge_mask.sum().item()),),
-                            device=self.device,
-                        )
-                        y_edge_abs = sample_uniform(
-                            float(getattr(self.cfg, "teacher_reference_edge_y_abs_min_m", 0.36)),
-                            float(getattr(self.cfg, "teacher_reference_edge_y_abs_max_m", 0.58)),
-                            (int(edge_mask.sum().item()),),
-                            device=self.device,
-                        )
-                        y_edge_sign = torch.where(
-                            torch.rand((int(edge_mask.sum().item()),), device=self.device) < 0.5,
-                            -torch.ones((int(edge_mask.sum().item()),), device=self.device),
-                            torch.ones((int(edge_mask.sum().item()),), device=self.device),
-                        )
-                        y_ref[edge_mask] = y_edge_abs * y_edge_sign
-                        yaw_ref[edge_mask] = sample_uniform(
-                            -float(getattr(self.cfg, "teacher_reference_edge_yaw_deg", 10.0)) * math.pi / 180.0,
-                            float(getattr(self.cfg, "teacher_reference_edge_yaw_deg", 10.0)) * math.pi / 180.0,
-                            (int(edge_mask.sum().item()),),
-                            device=self.device,
-                        )
-
-                        x_ref[mouth_mask] = sample_uniform(
-                            float(getattr(self.cfg, "teacher_reference_mouth_x_min_m", -3.55)),
-                            float(getattr(self.cfg, "teacher_reference_mouth_x_max_m", -3.25)),
-                            (int(mouth_mask.sum().item()),),
-                            device=self.device,
-                        )
-                        y_ref[mouth_mask] = sample_uniform(
-                            -float(getattr(self.cfg, "teacher_reference_mouth_y_abs_m", 0.18)),
-                            float(getattr(self.cfg, "teacher_reference_mouth_y_abs_m", 0.18)),
-                            (int(mouth_mask.sum().item()),),
-                            device=self.device,
-                        )
-                        yaw_ref[mouth_mask] = sample_uniform(
-                            -float(getattr(self.cfg, "teacher_reference_mouth_yaw_deg", 6.0)) * math.pi / 180.0,
-                            float(getattr(self.cfg, "teacher_reference_mouth_yaw_deg", 6.0)) * math.pi / 180.0,
-                            (int(mouth_mask.sum().item()),),
-                            device=self.device,
-                        )
-
-                        x_ref[preinsert_mask] = sample_uniform(
-                            float(getattr(self.cfg, "teacher_reference_preinsert_x_min_m", -3.12)),
-                            float(getattr(self.cfg, "teacher_reference_preinsert_x_max_m", -2.98)),
-                            (int(preinsert_mask.sum().item()),),
-                            device=self.device,
-                        )
-                        y_ref[preinsert_mask] = sample_uniform(
-                            -float(getattr(self.cfg, "teacher_reference_preinsert_y_abs_m", 0.08)),
-                            float(getattr(self.cfg, "teacher_reference_preinsert_y_abs_m", 0.08)),
-                            (int(preinsert_mask.sum().item()),),
-                            device=self.device,
-                        )
-                        yaw_ref[preinsert_mask] = sample_uniform(
-                            -float(getattr(self.cfg, "teacher_reference_preinsert_yaw_deg", 3.0)) * math.pi / 180.0,
-                            float(getattr(self.cfg, "teacher_reference_preinsert_yaw_deg", 3.0)) * math.pi / 180.0,
-                            (int(preinsert_mask.sum().item()),),
-                            device=self.device,
-                        )
-
-                        x_ref[partial_mask] = sample_uniform(
-                            float(getattr(self.cfg, "teacher_reference_partial_insert_x_min_m", -2.88)),
-                            float(getattr(self.cfg, "teacher_reference_partial_insert_x_max_m", -2.70)),
-                            (int(partial_mask.sum().item()),),
-                            device=self.device,
-                        )
-                        y_ref[partial_mask] = sample_uniform(
-                            -float(getattr(self.cfg, "teacher_reference_partial_insert_y_abs_m", 0.05)),
-                            float(getattr(self.cfg, "teacher_reference_partial_insert_y_abs_m", 0.05)),
-                            (int(partial_mask.sum().item()),),
-                            device=self.device,
-                        )
-                        yaw_ref[partial_mask] = sample_uniform(
-                            -float(getattr(self.cfg, "teacher_reference_partial_insert_yaw_deg", 2.0)) * math.pi / 180.0,
-                            float(getattr(self.cfg, "teacher_reference_partial_insert_yaw_deg", 2.0)) * math.pi / 180.0,
-                            (int(partial_mask.sum().item()),),
-                            device=self.device,
-                        )
-                        x = torch.where(ref_mask, x_ref, x)
-                        y = torch.where(ref_mask, y_ref, y)
-                        yaw = torch.where(ref_mask, yaw_ref, yaw)
-                        self._teacher_reference_reset_active[env_ids] = ref_mask.squeeze(-1)
-                        self._teacher_reference_reset_phase[env_ids] = torch.where(
-                            ref_mask.squeeze(-1),
-                            phase.squeeze(-1),
-                            torch.zeros_like(phase.squeeze(-1)),
-                        )
             if bool(self.cfg.stage1_near_hard_curriculum_enable):
                 frac = max(0.0, min(1.0, float(self.cfg.stage1_near_hard_curriculum_frac)))
                 start = float(getattr(self.cfg, "stage1_near_hard_curriculum_start_step", 0.0))
@@ -6286,12 +5530,8 @@ class ForkliftPalletInsertLiftEnv(DirectRLEnv):
                     1.0,
                 )
                 frac *= max(0.0, min(1.0, (float(self.common_step_counter) - start) / ramp))
-                if frac > 0.0:
-                    near_hard_mask = torch.rand((len(env_ids), 1), device=self.device) < frac
-                    near_hard_count = int(near_hard_mask.sum().item())
-                else:
-                    near_hard_mask = None
-                    near_hard_count = 0
+                near_hard_mask = torch.rand((len(env_ids), 1), device=self.device) < frac
+                near_hard_count = int(near_hard_mask.sum().item())
                 if near_hard_count > 0:
                     hard_y_frac = max(
                         0.0,
@@ -6376,8 +5616,7 @@ class ForkliftPalletInsertLiftEnv(DirectRLEnv):
             )
         z = torch.full((len(env_ids), 1), 0.03, device=self.device)
 
-        pos_local = torch.cat([x, y, z], dim=1)
-        pos = pos_local + env_origins
+        pos = torch.cat([x, y, z], dim=1)
         half = yaw * 0.5
         quat = torch.cat([torch.cos(half), torch.zeros_like(half), torch.zeros_like(half), torch.sin(half)], dim=1)
         self._debug_reset_x[env_ids] = x.squeeze(-1)
@@ -6385,7 +5624,6 @@ class ForkliftPalletInsertLiftEnv(DirectRLEnv):
         self._debug_reset_yaw_deg[env_ids] = yaw.squeeze(-1) * (180.0 / math.pi)
 
         self._write_root_pose(self.robot, pos, quat, env_ids)
-        self._sync_dual_camera_poses(env_ids, root_pos=pos, root_quat=quat)
 
         # 速度清零
         zeros3 = torch.zeros((len(env_ids), 3), device=self.device)
@@ -6399,7 +5637,6 @@ class ForkliftPalletInsertLiftEnv(DirectRLEnv):
         # Exp8.3 B0′：在写入 pallet / robot / joint 之后，用 reset 张量生成参考轨迹，
         # 避免旧 episode 位姿污染 r_cd / r_cpsi。
         self._prev_phi_traj[env_ids] = 0.0
-        self._prev_progress_curve_score[env_ids] = 0.0
         if bool(getattr(self.cfg, "use_reference_trajectory", True)):
             lift_j = joint_pos[:, self._lift_id]
             fc3 = self._compute_fork_center_from_root_lift(pos, quat, lift_j)
@@ -6467,34 +5704,6 @@ class ForkliftPalletInsertLiftEnv(DirectRLEnv):
             dist_front_reset = torch.clamp(s_front_reset - s_base_reset, min=0.0)
         else:
             dist_front_reset = true_dist_front_reset
-
-        if bool(getattr(self.cfg, "progress_teacher_curve_guidance_enable", False)):
-            d_traj_reset, yaw_traj_reset, s_traj_reset = self._query_reference_trajectory()
-            curve_dist_score_reset = torch.exp(
-                -(
-                    d_traj_reset[env_ids]
-                    / max(float(getattr(self.cfg, "progress_teacher_curve_distance_sigma_m", 0.35)), 1e-6)
-                )
-                ** 2
-            )
-            curve_yaw_score_reset = torch.exp(
-                -(
-                    yaw_traj_reset[env_ids]
-                    / max(float(getattr(self.cfg, "progress_teacher_curve_yaw_sigma_deg", 15.0)), 1e-6)
-                )
-                ** 2
-            )
-            curve_gate_reset = smoothstep(
-                (
-                    float(getattr(self.cfg, "progress_teacher_curve_near_gate_m", 2.2))
-                    - dist_front_reset
-                )
-                / max(float(getattr(self.cfg, "progress_teacher_curve_near_gate_ramp_m", 0.8)), 1e-6)
-            )
-            self._prev_progress_curve_score[env_ids] = (
-                curve_dist_score_reset * curve_yaw_score_reset * curve_gate_reset
-            ).detach()
-            self._prev_phi_traj[env_ids] = s_traj_reset[env_ids].detach()
 
         # 实验 3.2: 近场 commit 状态量初始化 (使用真实的叉尖距离)
         self._prev_dist_front[env_ids] = true_dist_front_reset.detach()

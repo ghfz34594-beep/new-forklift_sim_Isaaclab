@@ -134,6 +134,7 @@ class ForkliftInsertLiftGeoEdgePPORunnerCfg(RslRlOnPolicyRunnerCfg):
 
     clip_actions = 1.0
 
+
 @configclass
 class ForkliftToyotaDualCameraApproachPPORunnerCfg(RslRlOnPolicyRunnerCfg):
     """Toyota-style dual-camera approach PPO.
@@ -233,257 +234,6 @@ class ForkliftToyotaDualCameraPushSafeApproachPPORunnerCfg(ForkliftToyotaDualCam
 
 
 @configclass
-class ForkliftDirectVisualInsertionCleanViewPPORunnerCfg(RslRlOnPolicyRunnerCfg):
-    """Direct CleanView RGB insertion PPO.
-
-    This is the direct visual-RL mainline after multi-env RGB isolation passed.
-    It uses CleanView45 dual RGB plus proprio for the actor, privileged state for
-    the critic, and no teacher action label or BC target.
-    """
-
-    seed = 42
-    device = "cuda:0"
-    num_steps_per_env = 64
-    obs_groups = {
-        "policy": ["image_left", "image_right", "proprio"],
-        "critic": ["critic"],
-    }
-    max_iterations = 400
-    save_interval = 50
-    run_name = "rewardv2_bounded_actor"
-    experiment_name = "direct_visual_insertion_cleanview"
-    resume = False
-    load_run = ""
-    load_checkpoint = ""
-
-    policy = ForkliftVisionActorCriticCfg(
-        class_name="rsl_rl.modules.VisionActorCritic",
-        init_noise_std=0.12,
-        noise_std_type="log",
-        actor_obs_normalization=False,
-        critic_obs_normalization=True,
-        actor_hidden_dims=[256, 256, 128],
-        critic_hidden_dims=[256, 256, 128],
-        activation="elu",
-        pretrained_backbone_path=None,
-        freeze_backbone=True,
-        freeze_backbone_updates=0,
-        imagenet_backbone_init=True,
-        backbone_type="resnet34",
-        dual_camera=True,
-        squash_actor_mean=True,
-        actor_action_scale=(0.65, 0.55),
-    )
-
-    algorithm = RslRlPpoAlgorithmCfg(
-        num_learning_epochs=5,
-        num_mini_batches=4,
-        learning_rate=3e-4,
-        schedule="adaptive",
-        gamma=0.99,
-        lam=0.95,
-        entropy_coef=0.0001,
-        desired_kl=0.008,
-        max_grad_norm=1.0,
-        value_loss_coef=1.0,
-        use_clipped_value_loss=True,
-        clip_param=0.2,
-    )
-
-    clip_actions = 1.0
-
-
-@configclass
-class ForkliftDirectVisualInsertionCleanViewV3PPORunnerCfg(
-    ForkliftDirectVisualInsertionCleanViewPPORunnerCfg
-):
-    """v3 direct visual insertion PPO runner.
-
-    The actor path remains CleanView45 dual RGB plus proprio.  This runner name
-    separates the push-gated reward/curriculum ablation from the v2 run that
-    learned a pushed-insertion shortcut.
-    """
-
-    max_iterations = 300
-    run_name = "rewardv3_pushgated"
-
-
-@configclass
-class ForkliftDirectVisualInsertionCleanViewV31PPORunnerCfg(
-    ForkliftDirectVisualInsertionCleanViewV3PPORunnerCfg
-):
-    """v3.1 direct visual insertion PPO runner."""
-
-    max_iterations = 180
-    run_name = "rewardv31_steer_sign"
-
-
-@configclass
-class ForkliftDirectVisualInsertionCleanViewV32PPORunnerCfg(
-    ForkliftDirectVisualInsertionCleanViewV31PPORunnerCfg
-):
-    """v3.2 direct visual insertion PPO runner.
-
-    This run addresses the v3.1 eval failure: clean drive behavior but same-sign
-    steering collapse across initial-y groups.  The visual backbone is trainable
-    from the start so the actor can adapt CleanView features to signed geometry.
-    """
-
-    max_iterations = 401
-    run_name = "rewardv32_trainable_backbone_steer_sign"
-
-    policy = ForkliftVisionActorCriticCfg(
-        class_name="rsl_rl.modules.VisionActorCritic",
-        init_noise_std=0.16,
-        noise_std_type="log",
-        actor_obs_normalization=False,
-        critic_obs_normalization=True,
-        actor_hidden_dims=[256, 256, 128],
-        critic_hidden_dims=[256, 256, 128],
-        activation="elu",
-        pretrained_backbone_path=None,
-        freeze_backbone=False,
-        freeze_backbone_updates=0,
-        imagenet_backbone_init=True,
-        backbone_type="resnet34",
-        dual_camera=True,
-        squash_actor_mean=True,
-        actor_action_scale=(0.65, 0.55),
-    )
-
-    algorithm = RslRlPpoAlgorithmCfg(
-        num_learning_epochs=4,
-        num_mini_batches=4,
-        learning_rate=1.5e-4,
-        schedule="adaptive",
-        gamma=0.99,
-        lam=0.95,
-        entropy_coef=0.0003,
-        desired_kl=0.006,
-        max_grad_norm=1.0,
-        value_loss_coef=1.0,
-        use_clipped_value_loss=True,
-        clip_param=0.2,
-    )
-
-
-@configclass
-class ForkliftDirectVisualInsertionCleanViewV33PPORunnerCfg(
-    ForkliftDirectVisualInsertionCleanViewV32PPORunnerCfg
-):
-    """v3.3 direct visual insertion PPO runner with push-shortcut guards."""
-
-    max_iterations = 401
-    run_name = "rewardv33_trainable_backbone_push_guard"
-
-
-@configclass
-class ForkliftDirectVisualInsertionCleanViewV34PPORunnerCfg(
-    ForkliftDirectVisualInsertionCleanViewV32PPORunnerCfg
-):
-    """v3.4 direct visual insertion PPO runner with approach-mouth rebalance."""
-
-    max_iterations = 401
-    run_name = "rewardv34_trainable_backbone_approach_rebalance"
-
-
-@configclass
-class ForkliftDirectVisualInsertionCleanViewV35PPORunnerCfg(
-    ForkliftDirectVisualInsertionCleanViewV32PPORunnerCfg
-):
-    """v3.5 direct visual PPO with teacher-reference reset curriculum."""
-
-    max_iterations = 501
-    run_name = "rewardv35_teacher_reference_reset"
-
-
-@configclass
-class ForkliftDirectVisualInsertionCleanViewV36PPORunnerCfg(
-    ForkliftDirectVisualInsertionCleanViewV32PPORunnerCfg
-):
-    """v3.6 direct visual PPO with hold-dense teacher-reference curriculum."""
-
-    max_iterations = 501
-    run_name = "rewardv36_hold_dense_teacher_reference"
-
-
-@configclass
-class ForkliftDirectVisualInsertionCleanViewV37PPORunnerCfg(
-    ForkliftDirectVisualInsertionCleanViewV32PPORunnerCfg
-):
-    """v3.7 direct visual PPO with signed approach reference curriculum."""
-
-    max_iterations = 501
-    run_name = "rewardv37_signed_approach_teacher_reference"
-
-
-@configclass
-class ForkliftDirectVisualInsertionCleanViewV38PPORunnerCfg(
-    ForkliftDirectVisualInsertionCleanViewV32PPORunnerCfg
-):
-    """v3.8 direct visual PPO with approach-gated signed steering."""
-
-    max_iterations = 501
-    run_name = "rewardv38_approach_gated_signed_steer"
-
-
-@configclass
-class ForkliftDirectVisualInsertionCleanViewV39PPORunnerCfg(
-    ForkliftDirectVisualInsertionCleanViewV32PPORunnerCfg
-):
-    """v3.9 direct visual PPO preserving near-insert behavior."""
-
-    max_iterations = 501
-    run_name = "rewardv39_preserve_near_insert"
-
-
-@configclass
-class ForkliftDirectVisualInsertionCleanViewV40DirectPPORunnerCfg(
-    ForkliftDirectVisualInsertionCleanViewV32PPORunnerCfg
-):
-    """v4.0 scratch direct visual baseline before staged curriculum."""
-
-    num_steps_per_env = 16
-    max_iterations = 501
-    save_interval = 50
-    run_name = "rewardv40_direct_smoke_pushstrict_scratch_s16_mb32"
-
-    policy = ForkliftVisionActorCriticCfg(
-        class_name="rsl_rl.modules.VisionActorCritic",
-        init_noise_std=0.16,
-        noise_std_type="log",
-        actor_obs_normalization=False,
-        critic_obs_normalization=True,
-        actor_hidden_dims=[256, 256, 128],
-        critic_hidden_dims=[256, 256, 128],
-        activation="elu",
-        pretrained_backbone_path=None,
-        freeze_backbone=False,
-        freeze_backbone_updates=0,
-        imagenet_backbone_init=True,
-        backbone_type="resnet34",
-        dual_camera=True,
-        squash_actor_mean=True,
-        actor_action_scale=(0.65, 0.55),
-    )
-
-    algorithm = RslRlPpoAlgorithmCfg(
-        num_learning_epochs=4,
-        num_mini_batches=32,
-        learning_rate=1.5e-4,
-        schedule="adaptive",
-        gamma=0.99,
-        lam=0.95,
-        entropy_coef=0.00035,
-        desired_kl=0.006,
-        max_grad_norm=1.0,
-        value_loss_coef=1.0,
-        use_clipped_value_loss=True,
-        clip_param=0.2,
-    )
-
-
-@configclass
 class ForkliftToyotaGeoEdgePushSafeTeacherPPORunnerCfg(ForkliftInsertLiftGeoEdgePPORunnerCfg):
     """方案B teacher PPO: many-env geometric PushSafe approach policy."""
 
@@ -552,6 +302,89 @@ class ForkliftToyotaGeoEdgeRewardRefTeacherPPORunnerCfg(ForkliftToyotaGeoEdgePus
         use_clipped_value_loss=True,
         clip_param=0.2,
     )
+
+
+@configclass
+class ForkliftV311LegacyAcceptedTeacherVisualFreshPPORunnerCfg(RslRlOnPolicyRunnerCfg):
+    """Fresh visual PPO on the accepted V311 legacy teacher MDP."""
+
+    seed = 42
+    device = "cuda:0"
+    num_steps_per_env = 16
+    obs_groups = {
+        "policy": ["image_left", "image_right", "proprio"],
+        "critic": ["critic"],
+    }
+    max_iterations = 500
+    save_interval = 50
+    experiment_name = "v311_legacy_accepted_teacher_visual_fresh"
+    run_name = "v311_legacy_visual_fresh"
+
+    policy = ForkliftVisionActorCriticCfg(
+        class_name="rsl_rl.modules.VisionActorCritic",
+        init_noise_std=0.16,
+        noise_std_type="log",
+        actor_obs_normalization=False,
+        critic_obs_normalization=True,
+        actor_hidden_dims=[256, 256, 128],
+        critic_hidden_dims=[256, 256, 128],
+        activation="elu",
+        pretrained_backbone_path=None,
+        freeze_backbone=False,
+        freeze_backbone_updates=0,
+        imagenet_backbone_init=True,
+        backbone_type="resnet34",
+        dual_camera=True,
+        squash_actor_mean=True,
+        actor_action_scale=(0.65, 0.55),
+    )
+
+    algorithm = RslRlPpoAlgorithmCfg(
+        num_learning_epochs=5,
+        num_mini_batches=4,
+        learning_rate=3e-4,
+        schedule="adaptive",
+        gamma=0.99,
+        lam=0.95,
+        entropy_coef=0.0001,
+        desired_kl=0.008,
+        max_grad_norm=1.0,
+        value_loss_coef=1.0,
+        use_clipped_value_loss=True,
+        clip_param=0.2,
+    )
+
+    clip_actions = 1.0
+
+
+@configclass
+class ForkliftV311LegacyAcceptedTeacherVisualFreshPushPenaltyW10PPORunnerCfg(
+    ForkliftV311LegacyAcceptedTeacherVisualFreshPPORunnerCfg
+):
+    """Single-factor reward run: same visual PPO, stronger push penalty."""
+
+    experiment_name = "v311_legacy_visual_reward_single_factor"
+    run_name = "push_penalty_w10"
+
+
+@configclass
+class ForkliftV311LegacyAcceptedTeacherVisualFreshNearAlignW10PPORunnerCfg(
+    ForkliftV311LegacyAcceptedTeacherVisualFreshPPORunnerCfg
+):
+    """Single-factor reward run: same visual PPO, near-field align progress."""
+
+    experiment_name = "v311_legacy_visual_reward_single_factor"
+    run_name = "near_align_w10"
+
+
+@configclass
+class ForkliftV311LegacyAcceptedTeacherVisualFreshDirtyInsertW36PPORunnerCfg(
+    ForkliftV311LegacyAcceptedTeacherVisualFreshPPORunnerCfg
+):
+    """Single-factor reward run: same visual PPO, stronger dirty-insert penalty."""
+
+    experiment_name = "v311_legacy_visual_reward_single_factor"
+    run_name = "dirty_insert_w36"
 
 
 @configclass
@@ -729,195 +562,18 @@ class ForkliftToyotaGeoEdgeProgressTeacherPPORunnerCfg(ForkliftInsertLiftGeoEdge
 
 
 @configclass
-class ForkliftToyotaGeoEdgeProgressTeacherLongStable2000PPORunnerCfg(
+class ForkliftToyotaGeoEdgeProgressTeacherV311LegacyExactFreeze2000PPORunnerCfg(
     ForkliftToyotaGeoEdgeProgressTeacherPPORunnerCfg
 ):
-    """Fresh 2000-iter teacher runner with lower late-training policy drift."""
+    """Run the reproduced v3.11 teacher path to 2000iter without post-window drift."""
 
     max_iterations = 2000
     save_interval = 50
-    run_name = "progress_teacher_longstable2000_v4_seed42_1024env_2000iter"
-    experiment_name = "forklift_toyota_geoedge_progress_teacher_longstable2000_v4"
+    run_name = "progress_teacher_v311_legacy_exact_freeze_v8_seed42_1024env_2000iter"
+    experiment_name = "forklift_toyota_geoedge_progress_teacher_v311_legacy_exact_freeze_v8"
     resume = False
     load_run = ""
     load_checkpoint = ""
-
-    policy = RslRlPpoActorCriticCfg(
-        class_name="rsl_rl.modules.ClampedActorCritic",
-        init_noise_std=0.65,
-        noise_std_type="log",
-        actor_obs_normalization=True,
-        critic_obs_normalization=True,
-        actor_hidden_dims=[256, 256, 128],
-        critic_hidden_dims=[256, 256, 128],
-        activation="elu",
-    )
-
-    algorithm = RslRlPpoAlgorithmCfg(
-        num_learning_epochs=5,
-        num_mini_batches=4,
-        learning_rate=3e-4,
-        schedule="adaptive",
-        gamma=0.99,
-        lam=0.95,
-        entropy_coef=0.001,
-        desired_kl=0.01,
-        max_grad_norm=1.0,
-        value_loss_coef=1.0,
-        use_clipped_value_loss=True,
-        clip_param=0.2,
-    )
-
-
-@configclass
-class ForkliftToyotaGeoEdgeProgressTeacherAntiDrift2000PPORunnerCfg(
-    ForkliftToyotaGeoEdgeProgressTeacherPPORunnerCfg
-):
-    """Fresh 2000-iter teacher with a low-drift PPO phase after the v3.11 window."""
-
-    max_iterations = 2000
-    save_interval = 50
-    run_name = "progress_teacher_antidrift2000_v5_seed42_1024env_2000iter"
-    experiment_name = "forklift_toyota_geoedge_progress_teacher_antidrift2000_v5"
-    resume = False
-    load_run = ""
-    load_checkpoint = ""
-
-    policy = RslRlPpoActorCriticCfg(
-        class_name="rsl_rl.modules.ClampedActorCritic",
-        init_noise_std=0.65,
-        noise_std_type="log",
-        actor_obs_normalization=True,
-        critic_obs_normalization=True,
-        actor_hidden_dims=[256, 256, 128],
-        critic_hidden_dims=[256, 256, 128],
-        activation="elu",
-    )
-
-    algorithm = RslRlPpoAlgorithmCfg(
-        num_learning_epochs=5,
-        num_mini_batches=4,
-        learning_rate=3e-4,
-        schedule="adaptive",
-        gamma=0.99,
-        lam=0.95,
-        entropy_coef=0.001,
-        desired_kl=0.01,
-        max_grad_norm=1.0,
-        value_loss_coef=1.0,
-        use_clipped_value_loss=True,
-        clip_param=0.2,
-    )
-
-    late_phase_schedule = {
-        "enable": True,
-        "start_iter": 400,
-        "ramp_iters": 40,
-        "learning_rate": 2.0e-5,
-        "entropy_coef": 0.0,
-        "desired_kl": 0.0015,
-        "clip_param": 0.04,
-        "max_grad_norm": 0.35,
-        "num_learning_epochs": 2,
-        "num_mini_batches": 8,
-        "action_std": 0.11,
-    }
-
-
-@configclass
-class ForkliftToyotaGeoEdgeProgressTeacherV311LegacyAntiDrift2000PPORunnerCfg(
-    ForkliftToyotaGeoEdgeProgressTeacherPPORunnerCfg
-):
-    """v6: v3.11 early window with very small post-400 policy updates."""
-
-    max_iterations = 2000
-    save_interval = 50
-    run_name = "progress_teacher_v311legacy_antidrift2000_v6_seed42_1024env_2000iter"
-    experiment_name = "forklift_toyota_geoedge_progress_teacher_v311legacy_antidrift2000_v6"
-    resume = False
-    load_run = ""
-    load_checkpoint = ""
-
-    policy = RslRlPpoActorCriticCfg(
-        class_name="rsl_rl.modules.ClampedActorCritic",
-        init_noise_std=0.65,
-        noise_std_type="log",
-        actor_obs_normalization=True,
-        critic_obs_normalization=True,
-        actor_hidden_dims=[256, 256, 128],
-        critic_hidden_dims=[256, 256, 128],
-        activation="elu",
-    )
-
-    algorithm = RslRlPpoAlgorithmCfg(
-        num_learning_epochs=5,
-        num_mini_batches=4,
-        learning_rate=3e-4,
-        schedule="adaptive",
-        gamma=0.99,
-        lam=0.95,
-        entropy_coef=0.001,
-        desired_kl=0.01,
-        max_grad_norm=1.0,
-        value_loss_coef=1.0,
-        use_clipped_value_loss=True,
-        clip_param=0.2,
-    )
-
-    late_phase_schedule = {
-        "enable": True,
-        "start_iter": 400,
-        "ramp_iters": 20,
-        "learning_rate": 5.0e-6,
-        "entropy_coef": 0.0,
-        "desired_kl": 5.0e-4,
-        "clip_param": 0.02,
-        "max_grad_norm": 0.20,
-        "num_learning_epochs": 1,
-        "num_mini_batches": 16,
-        "action_std": 0.25,
-    }
-
-
-@configclass
-class ForkliftToyotaGeoEdgeProgressTeacherV311WindowFreeze2000PPORunnerCfg(
-    ForkliftToyotaGeoEdgeProgressTeacherPPORunnerCfg
-):
-    """v7: learn the proven v3.11 window, then use near-frozen PPO to avoid drift."""
-
-    max_iterations = 2000
-    save_interval = 50
-    run_name = "progress_teacher_v311_window_freeze_v7_seed42_1024env_2000iter"
-    experiment_name = "forklift_toyota_geoedge_progress_teacher_v311_window_freeze_v7"
-    resume = False
-    load_run = ""
-    load_checkpoint = ""
-
-    policy = RslRlPpoActorCriticCfg(
-        class_name="rsl_rl.modules.ClampedActorCritic",
-        init_noise_std=0.65,
-        noise_std_type="log",
-        actor_obs_normalization=True,
-        critic_obs_normalization=True,
-        actor_hidden_dims=[256, 256, 128],
-        critic_hidden_dims=[256, 256, 128],
-        activation="elu",
-    )
-
-    algorithm = RslRlPpoAlgorithmCfg(
-        num_learning_epochs=5,
-        num_mini_batches=4,
-        learning_rate=3e-4,
-        schedule="adaptive",
-        gamma=0.99,
-        lam=0.95,
-        entropy_coef=0.001,
-        desired_kl=0.01,
-        max_grad_norm=1.0,
-        value_loss_coef=1.0,
-        use_clipped_value_loss=True,
-        clip_param=0.2,
-    )
 
     late_phase_schedule = {
         "enable": True,
@@ -935,89 +591,125 @@ class ForkliftToyotaGeoEdgeProgressTeacherV311WindowFreeze2000PPORunnerCfg(
 
 
 @configclass
-class ForkliftToyotaGeoEdgeProgressTeacherCurveGuidancePPORunnerCfg(
+class ForkliftToyotaGeoEdgeProgressTeacherV311LegacyExactLowDrift2000PPORunnerCfg(
     ForkliftToyotaGeoEdgeProgressTeacherPPORunnerCfg
 ):
-    """Single-factor curve-guidance teacher runner namespace."""
+    """Exact v3.11 early window with small non-zero post-400 PPO updates."""
 
-    run_name = "progress_teacher_curve_guidance_seed42_1024env_1200iter"
-    experiment_name = "forklift_toyota_geoedge_progress_teacher_curve_guidance"
-
-
-@configclass
-class ForkliftToyotaGeoEdgeProgressTeacherRecoveryFixPPORunnerCfg(
-    ForkliftToyotaGeoEdgeProgressTeacherPPORunnerCfg
-):
-    """Recovery-focused teacher runner; eval selects the best checkpoint."""
-
-    run_name = "progress_teacher_recovery_fix_seed42_1024env_1200iter"
-    experiment_name = "forklift_toyota_geoedge_progress_teacher_recovery_fix"
-
-
-@configclass
-class ForkliftToyotaGeoEdgeProgressTeacherV311RecoveryPPORunnerCfg(
-    ForkliftToyotaGeoEdgeProgressTeacherPPORunnerCfg
-):
-    """v3.11 reward plus late near-lateral recovery reset curriculum."""
-
-    max_iterations = 400
+    max_iterations = 2000
     save_interval = 50
-    run_name = "progress_teacher_v311_recovery_seed42_1024env_400iter"
-    experiment_name = "forklift_toyota_geoedge_progress_teacher_v311_recovery"
+    run_name = "progress_teacher_v311_legacy_exact_lowdrift_v9_seed42_1024env_2000iter"
+    experiment_name = "forklift_toyota_geoedge_progress_teacher_v311_legacy_exact_lowdrift_v9"
+    resume = False
+    load_run = ""
+    load_checkpoint = ""
+
+    late_phase_schedule = {
+        "enable": True,
+        "start_iter": 400,
+        "ramp_iters": 1,
+        "learning_rate": 1.0e-6,
+        "entropy_coef": 0.0,
+        "desired_kl": 1.0e-4,
+        "clip_param": 0.01,
+        "max_grad_norm": 0.05,
+        "num_learning_epochs": 1,
+        "num_mini_batches": 16,
+        "action_std": 0.05,
+        "schedule": "fixed",
+        "freeze_normalization": True,
+    }
 
 
 @configclass
-class ForkliftToyotaGeoEdgeProgressTeacherV311PosYFinetunePPORunnerCfg(
-    ForkliftToyotaGeoEdgeProgressTeacherPPORunnerCfg
+class ForkliftToyotaGeoEdgeProgressTeacherV311LegacyNearLateralRecovery2000PPORunnerCfg(
+    ForkliftToyotaGeoEdgeProgressTeacherV311LegacyExactLowDrift2000PPORunnerCfg
 ):
-    """Short low-LR finetune for the positive-y near-lateral recovery gap."""
+    """Low-drift 2000iter teacher with near-lateral reset coverage from scratch."""
 
-    max_iterations = 160
-    save_interval = 20
-    run_name = "progress_teacher_v311_posy_finetune_seed42_1024env_160iter"
-    experiment_name = "forklift_toyota_geoedge_progress_teacher_v311_posy_finetune"
-
-    policy = RslRlPpoActorCriticCfg(
-        class_name="rsl_rl.modules.ClampedActorCritic",
-        init_noise_std=0.18,
-        noise_std_type="log",
-        actor_obs_normalization=True,
-        critic_obs_normalization=True,
-        actor_hidden_dims=[256, 256, 128],
-        critic_hidden_dims=[256, 256, 128],
-        activation="elu",
-    )
-
-    algorithm = RslRlPpoAlgorithmCfg(
-        num_learning_epochs=3,
-        num_mini_batches=8,
-        learning_rate=2e-5,
-        schedule="adaptive",
-        gamma=0.99,
-        lam=0.95,
-        entropy_coef=0.0,
-        desired_kl=0.002,
-        max_grad_norm=0.5,
-        value_loss_coef=1.0,
-        use_clipped_value_loss=True,
-        clip_param=0.05,
-    )
+    run_name = "progress_teacher_v311_legacy_nearlat_recovery_v10_seed42_1024env_2000iter"
+    experiment_name = "forklift_toyota_geoedge_progress_teacher_v311_legacy_nearlat_recovery_v10"
 
 
 @configclass
-class ForkliftToyotaGeoEdgeProgressTeacherV311OppYawFinetunePPORunnerCfg(
+class ForkliftToyotaGeoEdgeProgressTeacherV311LegacyLateNearLateralRecovery2000PPORunnerCfg(
+    ForkliftToyotaGeoEdgeProgressTeacherV311LegacyExactLowDrift2000PPORunnerCfg
+):
+    """v3.11 early window followed by low-drift near-lateral recovery refinement."""
+
+    run_name = "progress_teacher_v311_legacy_late_nearlat_recovery_v11_seed42_1024env_2000iter"
+    experiment_name = "forklift_toyota_geoedge_progress_teacher_v311_legacy_late_nearlat_recovery_v11"
+
+
+@configclass
+class ForkliftToyotaGeoEdgeProgressTeacherV311LegacyLateNearLateralHold2000PPORunnerCfg(
+    ForkliftToyotaGeoEdgeProgressTeacherV311LegacyExactLowDrift2000PPORunnerCfg
+):
+    """Let the v3.11 policy mature before gently holding the late checkpoint."""
+
+    run_name = "progress_teacher_v311_legacy_late_nearlat_hold_v12_seed42_1024env_2000iter"
+    experiment_name = "forklift_toyota_geoedge_progress_teacher_v311_legacy_late_nearlat_hold_v12"
+
+    late_phase_schedule = {
+        "enable": True,
+        "start_iter": 550,
+        "ramp_iters": 1,
+        "learning_rate": 5.0e-7,
+        "entropy_coef": 0.0,
+        "desired_kl": 5.0e-5,
+        "clip_param": 0.005,
+        "max_grad_norm": 0.02,
+        "num_learning_epochs": 1,
+        "num_mini_batches": 16,
+        "action_std": 0.12,
+        "schedule": "fixed",
+        "freeze_normalization": True,
+    }
+
+
+@configclass
+class ForkliftToyotaGeoEdgeProgressTeacherV311LegacyExactFreezeActor450To2000PPORunnerCfg(
+    ForkliftToyotaGeoEdgeProgressTeacherV311LegacyExactLowDrift2000PPORunnerCfg
+):
+    """Resume from the verified model_450 window and keep the actor fixed to 2000."""
+
+    run_name = "progress_teacher_v311_legacy_exact_freeze_actor450_v13_seed42_1024env_2000iter"
+    experiment_name = "forklift_toyota_geoedge_progress_teacher_v311_legacy_exact_freeze_actor450_v13"
+
+    late_phase_schedule = {
+        "enable": True,
+        "start_iter": 450,
+        "ramp_iters": 1,
+        "learning_rate": 0.0,
+        "entropy_coef": 0.0,
+        "desired_kl": 0.0,
+        "clip_param": 0.0,
+        "max_grad_norm": 0.0,
+        "num_learning_epochs": 1,
+        "num_mini_batches": 16,
+        "schedule": "fixed",
+        "freeze_normalization": True,
+        "freeze_actor": True,
+    }
+
+
+@configclass
+class ForkliftToyotaGeoEdgeProgressTeacherV311LegacyCleanQualityProbePPORunnerCfg(
     ForkliftToyotaGeoEdgeProgressTeacherPPORunnerCfg
 ):
-    """Very short low-LR finetune for near-lateral opposite-yaw starts."""
+    """Time-boxed clean-quality probe warm-started from the accepted teacher."""
 
-    max_iterations = 80
-    save_interval = 10
-    run_name = "progress_teacher_v311_oppyaw_finetune_seed42_1024env_80iter"
-    experiment_name = "forklift_toyota_geoedge_progress_teacher_v311_oppyaw_finetune"
+    max_iterations = 300
+    save_interval = 25
+    run_name = "progress_teacher_v311_legacy_clean_quality_probe_seed42_300iter"
+    experiment_name = "forklift_toyota_geoedge_progress_teacher_v311_legacy_clean_quality_probe"
+    resume = False
+    load_run = ""
+    load_checkpoint = ""
 
     policy = RslRlPpoActorCriticCfg(
         class_name="rsl_rl.modules.ClampedActorCritic",
-        init_noise_std=0.10,
+        init_noise_std=0.08,
         noise_std_type="log",
         actor_obs_normalization=True,
         critic_obs_normalization=True,
@@ -1029,14 +721,42 @@ class ForkliftToyotaGeoEdgeProgressTeacherV311OppYawFinetunePPORunnerCfg(
     algorithm = RslRlPpoAlgorithmCfg(
         num_learning_epochs=2,
         num_mini_batches=8,
-        learning_rate=8e-6,
+        learning_rate=8.0e-6,
         schedule="adaptive",
         gamma=0.99,
         lam=0.95,
         entropy_coef=0.0,
-        desired_kl=0.0012,
+        desired_kl=0.0015,
         max_grad_norm=0.35,
         value_loss_coef=1.0,
         use_clipped_value_loss=True,
         clip_param=0.035,
     )
+
+
+@configclass
+class ForkliftToyotaGeoEdgeProgressTeacherV311LegacyExactLowDriftFreezeActor450Scratch2000PPORunnerCfg(
+    ForkliftToyotaGeoEdgeProgressTeacherV311LegacyExactLowDrift2000PPORunnerCfg
+):
+    """Train from scratch, preserve the successful v3.11 low-drift window after 450."""
+
+    run_name = "progress_teacher_v311_legacy_exact_lowdrift_freeze_actor450_v14_seed42_1024env_2000iter"
+    experiment_name = "forklift_toyota_geoedge_progress_teacher_v311_legacy_exact_lowdrift_freeze_actor450_v14"
+
+    late_phase_schedule = {
+        "enable": True,
+        "start_iter": 400,
+        "ramp_iters": 1,
+        "learning_rate": 1.0e-6,
+        "entropy_coef": 0.0,
+        "desired_kl": 1.0e-4,
+        "clip_param": 0.01,
+        "max_grad_norm": 0.05,
+        "num_learning_epochs": 1,
+        "num_mini_batches": 16,
+        "action_std": 0.05,
+        "schedule": "fixed",
+        "freeze_normalization": True,
+        "freeze_actor": True,
+        "freeze_actor_start_iter": 450,
+    }

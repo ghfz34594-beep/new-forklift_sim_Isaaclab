@@ -14,7 +14,7 @@ from isaaclab.actuators import ImplicitActuatorCfg
 from isaaclab.assets import ArticulationCfg, RigidObjectCfg
 from isaaclab.envs import DirectRLEnvCfg
 from isaaclab.scene import InteractiveSceneCfg
-from isaaclab.sim import RenderCfg, SimulationCfg
+from isaaclab.sim import SimulationCfg
 from isaaclab.sim.spawners.from_files import GroundPlaneCfg
 from isaaclab.sensors import TiledCameraCfg
 from isaaclab.utils.assets import ISAAC_NUCLEUS_DIR
@@ -92,11 +92,6 @@ class ForkliftPalletInsertLiftEnvCfg(DirectRLEnvCfg):
     stage1_success_without_lift: bool = True
     # 禁用等待贴图加载，避免因 PNG 解析报错导致仿真启动挂起
     wait_for_textures: bool = False
-    # Keep visual camera sync and large-grid ground behavior opt-in.  Privileged
-    # teacher recovery runs can flip these to match the proven v3.11 path.
-    legacy_direct_step_enable: bool = False
-    auto_expand_ground_for_env_grid: bool = True
-    legacy_reset_world_origin_enable: bool = False
 
     # Stage 1 初始随机化范围。
     # Exp9.0: 对齐 master 的原始分布，便于和“无参考轨迹”基准直接对照：
@@ -111,6 +106,8 @@ class ForkliftPalletInsertLiftEnvCfg(DirectRLEnvCfg):
     stage1_init_yaw_deg_max: float = 14.32394487827058
     stage1_near_hard_curriculum_enable: bool = False
     stage1_near_hard_curriculum_frac: float = 0.0
+    stage1_near_hard_curriculum_start_step: int = 0
+    stage1_near_hard_curriculum_ramp_steps: int = 1
     stage1_near_hard_x_min_m: float = -3.35
     stage1_near_hard_x_max_m: float = -3.00
     stage1_near_hard_y_abs_min_m: float = 0.30
@@ -165,8 +162,6 @@ class ForkliftPalletInsertLiftEnvCfg(DirectRLEnvCfg):
     dual_camera_width: int = 224
     dual_camera_height: int = 224
     dual_camera_hfov_deg: float = 60.0
-    dual_camera_near_clip_m: float = 0.1
-    dual_camera_far_clip_m: float = 40.0
     dual_camera_left_pos_local: tuple[float, float, float] = (120.0, 55.0, 150.0)
     dual_camera_right_pos_local: tuple[float, float, float] = (120.0, -55.0, 150.0)
     dual_camera_left_rpy_local_deg: tuple[float, float, float] = (0.0, 68.0, -8.0)
@@ -254,7 +249,6 @@ class ForkliftPalletInsertLiftEnvCfg(DirectRLEnvCfg):
     vision_room_width_m: float = 8.0
     vision_room_height_m: float = 3.0
     vision_room_wall_thickness_m: float = 0.15
-    vision_room_ceiling_enable: bool = True
     vision_room_center_x_m: float = -1.5
     vision_room_center_y_m: float = 0.0
     vision_room_color: tuple[float, float, float] = (0.55, 0.58, 0.60)
@@ -483,14 +477,11 @@ class ForkliftPalletInsertLiftEnvCfg(DirectRLEnvCfg):
     preinsert_action_guard_enable: bool = False
     preinsert_action_guard_stateful_enable: bool = True
     preinsert_action_guard_initial_near_hard_only: bool = False
-    preinsert_action_guard_opposite_yaw_only: bool = False
     preinsert_action_guard_trigger_dist_m: float = 0.65
     preinsert_action_guard_release_dist_m: float = 0.85
     preinsert_action_guard_center_m: float = 0.24
     preinsert_action_guard_tip_m: float = 0.16
     preinsert_action_guard_yaw_deg: float = 7.0
-    preinsert_action_guard_lateral_sign: str = "any"  # any | positive | negative
-    preinsert_action_guard_lateral_sign_min_m: float = 0.0
     preinsert_action_guard_insert_frac_max: float = 0.25
     preinsert_action_guard_max_forward_action: float = 0.0
     preinsert_action_guard_force_reverse: bool = True
@@ -501,10 +492,7 @@ class ForkliftPalletInsertLiftEnvCfg(DirectRLEnvCfg):
     preinsert_action_guard_max_steps: int = 0
     preinsert_action_guard_steer_to_reduce_error: bool = False
     preinsert_action_guard_steer_action: float = 0.35
-    preinsert_action_guard_reverse_steer_flip: bool = True
-    preinsert_action_guard_release_on_not_eligible: bool = True
     preinsert_action_guard_center_steer_weight: float = 1.0
-    preinsert_action_guard_tip_steer_weight: float = 0.0
     preinsert_action_guard_yaw_steer_weight: float = 0.6
     # Stage A structural repair: forward progress is only rewarded when the
     # fork is already geometrically aligned enough. This is default-off so old
@@ -1078,7 +1066,7 @@ class ForkliftPalletApproachToyotaDualCameraEnvCfg(ForkliftPalletInsertLiftEnvCf
         clone_in_fabric=False,
     )
     vision_room_enable: bool = True
-    rerender_on_reset: bool = False
+    rerender_on_reset: bool = True
 
 
 @configclass
@@ -1121,70 +1109,6 @@ class ForkliftPalletApproachToyotaDualCameraPushSafeEnvCfg(ForkliftPalletApproac
     preinsert_action_guard_insert_frac_max: float = 0.25
     preinsert_action_guard_max_forward_action: float = 0.0
     preinsert_action_guard_force_reverse: bool = False
-
-
-@configclass
-class ForkliftPalletApproachToyotaDualCameraCleanViewEnvCfg(ForkliftPalletApproachToyotaDualCameraPushSafeEnvCfg):
-    """Clean-view Toyota dual-camera approach task for student distillation.
-
-    The camera is intentionally close enough to keep the current env's fork tips
-    and pallet pockets visible while the room/far-clip checks keep other envs
-    out of view.
-    """
-
-    dual_camera_hfov_deg: float = 45.0
-    dual_camera_left_pos_local: tuple[float, float, float] = (135.0, 75.0, 120.0)
-    dual_camera_right_pos_local: tuple[float, float, float] = (135.0, -75.0, 120.0)
-    dual_camera_left_rpy_local_deg: tuple[float, float, float] = (0.0, 55.0, -16.0)
-    dual_camera_right_rpy_local_deg: tuple[float, float, float] = (0.0, 55.0, 16.0)
-    dual_camera_near_clip_m: float = 0.1
-    dual_camera_far_clip_m: float = 8.0
-
-    scene: InteractiveSceneCfg = InteractiveSceneCfg(
-        num_envs=128,
-        env_spacing=20.0,
-        replicate_physics=True,
-        filter_collisions=True,
-        clone_in_fabric=False,
-    )
-    vision_room_enable: bool = True
-    rerender_on_reset: bool = False
-
-
-@configclass
-class ForkliftPalletApproachToyotaDualCameraRoom60EnvCfg(ForkliftPalletApproachToyotaDualCameraPushSafeEnvCfg):
-    """Toyota-style Room60 dual-camera task for single-process multi-env RGB.
-
-    This is the canonical visual-isolation target: per-env room occlusion,
-    60-degree side cameras, short far clipping, and a spacing large enough that
-    any cross-env pixels indicate a scene/layout bug rather than a policy issue.
-    """
-
-    dual_camera_hfov_deg: float = 60.0
-    dual_camera_left_pos_local: tuple[float, float, float] = (175.0, 85.0, 180.0)
-    dual_camera_right_pos_local: tuple[float, float, float] = (175.0, -85.0, 180.0)
-    dual_camera_left_rpy_local_deg: tuple[float, float, float] = (0.0, 50.0, -8.0)
-    dual_camera_right_rpy_local_deg: tuple[float, float, float] = (0.0, 50.0, 8.0)
-    dual_camera_near_clip_m: float = 0.1
-    dual_camera_far_clip_m: float = 8.0
-
-    scene: InteractiveSceneCfg = InteractiveSceneCfg(
-        num_envs=128,
-        env_spacing=20.0,
-        replicate_physics=True,
-        filter_collisions=True,
-        clone_in_fabric=False,
-    )
-    vision_room_enable: bool = True
-    vision_room_collision_enable: bool = True
-    vision_room_length_m: float = 10.0
-    vision_room_width_m: float = 8.0
-    vision_room_height_m: float = 3.0
-    vision_room_wall_thickness_m: float = 0.15
-    vision_room_center_x_m: float = -1.5
-    vision_room_center_y_m: float = 0.0
-    vision_room_color: tuple[float, float, float] = (0.92, 0.92, 0.88)
-    rerender_on_reset: bool = False
 
 
 @configclass
@@ -1608,13 +1532,6 @@ class ForkliftPalletApproachToyotaGeoEdgeProgressTeacherEnvCfg(ForkliftPalletIns
     progress_teacher_commit_yaw_sigma_deg: float = 10.5
     progress_teacher_aligned_approach_progress_weight: float = 60.0
     progress_teacher_near_align_progress_weight: float = 0.0
-    progress_teacher_curve_guidance_enable: bool = False
-    progress_teacher_curve_guidance_weight: float = 18.0
-    progress_teacher_curve_distance_sigma_m: float = 0.35
-    progress_teacher_curve_yaw_sigma_deg: float = 15.0
-    progress_teacher_curve_progress_weight: float = 4.0
-    progress_teacher_curve_near_gate_m: float = 2.2
-    progress_teacher_curve_near_gate_ramp_m: float = 0.8
     progress_teacher_misaligned_forward_penalty_enable: bool = True
     progress_teacher_misaligned_forward_penalty_weight: float = 1.2
     progress_teacher_misaligned_forward_near_m: float = 0.62
@@ -1627,1501 +1544,164 @@ class ForkliftPalletApproachToyotaGeoEdgeProgressTeacherEnvCfg(ForkliftPalletIns
 
 
 @configclass
-class ForkliftPalletApproachToyotaGeoEdgeProgressTeacherLongStable2000EnvCfg(
+class ForkliftPalletApproachToyotaGeoEdgeProgressTeacherV311LegacyNearLateralRecoveryEnvCfg(
     ForkliftPalletApproachToyotaGeoEdgeProgressTeacherEnvCfg
 ):
-    """2000-iter teacher: v3.11 insertion window, then delayed recovery repair.
-
-    The first phase intentionally stays equivalent to the proven v3.11 scratch
-    teacher.  Recovery-only signals are multiplied by recovery_curriculum, so
-    they are inactive while the base insertion policy forms and only enter the
-    long run after the early checkpoint window.
-    """
-
-    preinsert_action_guard_enable: bool = False
-    preinsert_recovery_enable: bool = False
+    """v3.11 teacher with explicit near-distance high-lateral reset coverage."""
 
     stage1_near_hard_curriculum_enable: bool = True
-    stage1_near_hard_curriculum_frac: float = 0.16
-    stage1_near_hard_curriculum_start_step: int = 25_600
-    stage1_near_hard_curriculum_ramp_steps: int = 32_000
-    stage1_near_hard_x_min_m: float = -3.36
+    stage1_near_hard_curriculum_frac: float = 0.24
+    stage1_near_hard_curriculum_start_step: int = 6_400
+    stage1_near_hard_curriculum_ramp_steps: int = 19_200
+    stage1_near_hard_x_min_m: float = -3.25
     stage1_near_hard_x_max_m: float = -3.00
     stage1_near_hard_y_abs_min_m: float = 0.40
     stage1_near_hard_y_abs_max_m: float = 0.60
-    stage1_near_hard_yaw_abs_min_deg: float = 5.0
-    stage1_near_hard_yaw_abs_max_deg: float = 14.32394487827058
-    stage1_near_hard_lateral_frac: float = 1.0
-    stage1_near_hard_positive_y_frac: float = 0.62
-    stage1_near_hard_positive_yaw_frac: float = 0.5
-    stage1_near_hard_opposite_yaw_frac: float = 0.75
-
-    use_reference_trajectory: bool = False
-    progress_teacher_curve_guidance_enable: bool = False
-    progress_teacher_recovery_curriculum_enable: bool = True
-    progress_teacher_recovery_curriculum_start_step: int = 25_600
-    progress_teacher_recovery_curriculum_ramp_steps: int = 45_000
-
-    progress_teacher_near_align_progress_weight: float = 8.0
-
-    progress_teacher_close_noinsert_gate_enable: bool = True
-    progress_teacher_close_noinsert_gate_dist_m: float = 0.58
-    progress_teacher_close_noinsert_insert_start_norm: float = 0.030
-    progress_teacher_close_noinsert_insert_ramp_norm: float = 0.12
-    progress_teacher_close_noinsert_positive_floor: float = 0.45
-    progress_teacher_close_noinsert_commit_floor: float = 0.90
-    progress_teacher_close_noinsert_penalty_weight: float = 0.15
-
-    progress_teacher_far_noinsert_penalty_enable: bool = True
-    progress_teacher_far_noinsert_penalty_weight: float = 0.08
-    progress_teacher_far_noinsert_dist_m: float = 0.40
-    progress_teacher_far_noinsert_ramp_m: float = 0.26
-    progress_teacher_far_noinsert_start_step: float = 100.0
-    progress_teacher_far_noinsert_step_ramp: float = 120.0
-    progress_teacher_far_noinsert_insert_start_norm: float = 0.06
-    progress_teacher_far_noinsert_insert_ramp_norm: float = 0.12
-
-    progress_teacher_steer_sign_reward_enable: bool = True
-    progress_teacher_steer_sign_weight: float = 0.30
-    progress_teacher_steer_wrong_sign_penalty_weight: float = 0.80
-    progress_teacher_steer_sign_idle_penalty_weight: float = 0.0
-    progress_teacher_steer_sign_center_weight: float = 1.20
-    progress_teacher_steer_sign_tip_weight: float = 0.70
-    progress_teacher_steer_sign_yaw_weight: float = 0.25
-    progress_teacher_steer_sign_deadband: float = 0.040
-    progress_teacher_steer_sign_ramp: float = 0.24
-    progress_teacher_steer_sign_near_m: float = 1.35
-    progress_teacher_steer_sign_near_ramp_m: float = 0.90
-    progress_teacher_steer_sign_stop_insert_norm: float = 0.55
-    progress_teacher_steer_sign_min_abs_action: float = 0.020
-    progress_teacher_steer_sign_reward_requires_approach: bool = True
-    progress_teacher_steer_sign_reward_drive_min: float = -0.02
-    progress_teacher_steer_sign_reward_drive_ramp: float = 0.18
-    progress_teacher_steer_sign_reward_progress_min: float = 0.0004
-    progress_teacher_steer_sign_reward_progress_ramp: float = 0.005
-    progress_teacher_steer_sign_reward_away_start: float = 0.0005
-    progress_teacher_steer_sign_reward_away_ramp: float = 0.006
-    progress_teacher_steer_sign_reward_gate_floor: float = 0.03
-
-
-@configclass
-class ForkliftPalletApproachToyotaGeoEdgeProgressTeacherAntiDrift2000EnvCfg(
-    ForkliftPalletApproachToyotaGeoEdgeProgressTeacherEnvCfg
-):
-    """v3.11 teacher surface plus a gentle late near-lateral recovery curriculum."""
-
-    preinsert_action_guard_enable: bool = False
-    preinsert_recovery_enable: bool = False
-    use_reference_trajectory: bool = False
-    progress_teacher_curve_guidance_enable: bool = False
-
-    stage1_near_hard_curriculum_enable: bool = True
-    stage1_near_hard_curriculum_frac: float = 0.10
-    stage1_near_hard_curriculum_start_step: int = 25_600
-    stage1_near_hard_curriculum_ramp_steps: int = 51_200
-    stage1_near_hard_x_min_m: float = -3.34
-    stage1_near_hard_x_max_m: float = -3.00
-    stage1_near_hard_y_abs_min_m: float = 0.40
-    stage1_near_hard_y_abs_max_m: float = 0.60
-    stage1_near_hard_yaw_abs_min_deg: float = 4.0
-    stage1_near_hard_yaw_abs_max_deg: float = 14.32394487827058
-    stage1_near_hard_lateral_frac: float = 1.0
-    stage1_near_hard_positive_y_frac: float = 0.60
-    stage1_near_hard_positive_yaw_frac: float = 0.5
-    stage1_near_hard_opposite_yaw_frac: float = 0.75
-
-    progress_teacher_recovery_curriculum_enable: bool = True
-    progress_teacher_recovery_curriculum_start_step: int = 25_600
-    progress_teacher_recovery_curriculum_ramp_steps: int = 76_800
-    progress_teacher_near_align_progress_weight: float = 3.0
-
-    progress_teacher_close_noinsert_gate_enable: bool = True
-    progress_teacher_close_noinsert_gate_dist_m: float = 0.54
-    progress_teacher_close_noinsert_insert_start_norm: float = 0.030
-    progress_teacher_close_noinsert_insert_ramp_norm: float = 0.14
-    progress_teacher_close_noinsert_positive_floor: float = 0.65
-    progress_teacher_close_noinsert_commit_floor: float = 0.92
-    progress_teacher_close_noinsert_penalty_weight: float = 0.06
-
-    progress_teacher_far_noinsert_penalty_enable: bool = True
-    progress_teacher_far_noinsert_penalty_weight: float = 0.04
-    progress_teacher_far_noinsert_dist_m: float = 0.42
-    progress_teacher_far_noinsert_ramp_m: float = 0.30
-    progress_teacher_far_noinsert_start_step: float = 140.0
-    progress_teacher_far_noinsert_step_ramp: float = 160.0
-    progress_teacher_far_noinsert_insert_start_norm: float = 0.05
-    progress_teacher_far_noinsert_insert_ramp_norm: float = 0.14
-
-    progress_teacher_steer_sign_reward_enable: bool = True
-    progress_teacher_steer_sign_weight: float = 0.12
-    progress_teacher_steer_wrong_sign_penalty_weight: float = 0.28
-    progress_teacher_steer_sign_idle_penalty_weight: float = 0.0
-    progress_teacher_steer_sign_center_weight: float = 1.0
-    progress_teacher_steer_sign_tip_weight: float = 0.45
-    progress_teacher_steer_sign_yaw_weight: float = 0.18
-    progress_teacher_steer_sign_deadband: float = 0.060
-    progress_teacher_steer_sign_ramp: float = 0.32
-    progress_teacher_steer_sign_near_m: float = 1.20
-    progress_teacher_steer_sign_near_ramp_m: float = 0.85
-    progress_teacher_steer_sign_stop_insert_norm: float = 0.50
-    progress_teacher_steer_sign_min_abs_action: float = 0.025
-    progress_teacher_steer_sign_reward_requires_approach: bool = True
-    progress_teacher_steer_sign_reward_drive_min: float = -0.02
-    progress_teacher_steer_sign_reward_drive_ramp: float = 0.18
-    progress_teacher_steer_sign_reward_progress_min: float = 0.0006
-    progress_teacher_steer_sign_reward_progress_ramp: float = 0.006
-    progress_teacher_steer_sign_reward_away_start: float = 0.0005
-    progress_teacher_steer_sign_reward_away_ramp: float = 0.006
-    progress_teacher_steer_sign_reward_gate_floor: float = 0.03
-
-
-@configclass
-class ForkliftPalletApproachToyotaGeoEdgeProgressTeacherV311LegacyAntiDrift2000EnvCfg(
-    ForkliftPalletApproachToyotaGeoEdgeProgressTeacherEnvCfg
-):
-    """v6: recover the v3.11 training path, then continue with low-drift PPO."""
-
-    legacy_direct_step_enable: bool = True
-    auto_expand_ground_for_env_grid: bool = True
-
-    preinsert_action_guard_enable: bool = False
-    preinsert_recovery_enable: bool = False
-    use_reference_trajectory: bool = False
-    progress_teacher_curve_guidance_enable: bool = False
-
-    # Keep the 0-400iter window equivalent to v3.11.  The hard near-lateral
-    # curriculum only enters after model_500, so it cannot explain a failed
-    # early reproduction if model_400 is still low.
-    stage1_near_hard_curriculum_enable: bool = True
-    stage1_near_hard_curriculum_frac: float = 0.08
-    stage1_near_hard_curriculum_start_step: int = 38_400
-    stage1_near_hard_curriculum_ramp_steps: int = 76_800
-    stage1_near_hard_x_min_m: float = -3.34
-    stage1_near_hard_x_max_m: float = -3.00
-    stage1_near_hard_y_abs_min_m: float = 0.40
-    stage1_near_hard_y_abs_max_m: float = 0.60
-    stage1_near_hard_yaw_abs_min_deg: float = 4.0
-    stage1_near_hard_yaw_abs_max_deg: float = 14.32394487827058
-    stage1_near_hard_lateral_frac: float = 1.0
-    stage1_near_hard_positive_y_frac: float = 0.60
-    stage1_near_hard_positive_yaw_frac: float = 0.5
-    stage1_near_hard_opposite_yaw_frac: float = 0.75
-
-    progress_teacher_recovery_curriculum_enable: bool = True
-    progress_teacher_recovery_curriculum_start_step: int = 38_400
-    progress_teacher_recovery_curriculum_ramp_steps: int = 102_400
-    progress_teacher_near_align_progress_weight: float = 2.0
-
-    progress_teacher_close_noinsert_gate_enable: bool = True
-    progress_teacher_close_noinsert_gate_dist_m: float = 0.54
-    progress_teacher_close_noinsert_insert_start_norm: float = 0.030
-    progress_teacher_close_noinsert_insert_ramp_norm: float = 0.14
-    progress_teacher_close_noinsert_positive_floor: float = 0.68
-    progress_teacher_close_noinsert_commit_floor: float = 0.92
-    progress_teacher_close_noinsert_penalty_weight: float = 0.04
-
-    progress_teacher_far_noinsert_penalty_enable: bool = True
-    progress_teacher_far_noinsert_penalty_weight: float = 0.03
-    progress_teacher_far_noinsert_dist_m: float = 0.42
-    progress_teacher_far_noinsert_ramp_m: float = 0.30
-    progress_teacher_far_noinsert_start_step: float = 160.0
-    progress_teacher_far_noinsert_step_ramp: float = 180.0
-    progress_teacher_far_noinsert_insert_start_norm: float = 0.05
-    progress_teacher_far_noinsert_insert_ramp_norm: float = 0.14
-
-    progress_teacher_steer_sign_reward_enable: bool = True
-    progress_teacher_steer_sign_weight: float = 0.08
-    progress_teacher_steer_wrong_sign_penalty_weight: float = 0.18
-    progress_teacher_steer_sign_idle_penalty_weight: float = 0.0
-    progress_teacher_steer_sign_center_weight: float = 1.0
-    progress_teacher_steer_sign_tip_weight: float = 0.45
-    progress_teacher_steer_sign_yaw_weight: float = 0.18
-    progress_teacher_steer_sign_deadband: float = 0.065
-    progress_teacher_steer_sign_ramp: float = 0.34
-    progress_teacher_steer_sign_near_m: float = 1.20
-    progress_teacher_steer_sign_near_ramp_m: float = 0.85
-    progress_teacher_steer_sign_stop_insert_norm: float = 0.50
-    progress_teacher_steer_sign_min_abs_action: float = 0.025
-    progress_teacher_steer_sign_reward_requires_approach: bool = True
-    progress_teacher_steer_sign_reward_drive_min: float = -0.02
-    progress_teacher_steer_sign_reward_drive_ramp: float = 0.18
-    progress_teacher_steer_sign_reward_progress_min: float = 0.0006
-    progress_teacher_steer_sign_reward_progress_ramp: float = 0.006
-    progress_teacher_steer_sign_reward_away_start: float = 0.0005
-    progress_teacher_steer_sign_reward_away_ramp: float = 0.006
-    progress_teacher_steer_sign_reward_gate_floor: float = 0.03
-
-
-@configclass
-class ForkliftPalletApproachToyotaGeoEdgeProgressTeacherV311WindowFreeze2000EnvCfg(
-    ForkliftPalletApproachToyotaGeoEdgeProgressTeacherEnvCfg
-):
-    """v7: reproduce the v3.11 early policy window, then preserve it to 2000iter."""
-
-    legacy_direct_step_enable: bool = True
-    auto_expand_ground_for_env_grid: bool = False
-    legacy_reset_world_origin_enable: bool = True
-
-    preinsert_action_guard_enable: bool = False
-    preinsert_recovery_enable: bool = False
-    use_reference_trajectory: bool = False
-    progress_teacher_curve_guidance_enable: bool = False
-    progress_teacher_recovery_curriculum_enable: bool = False
-    progress_teacher_close_noinsert_gate_enable: bool = False
-    progress_teacher_far_noinsert_penalty_enable: bool = False
-    progress_teacher_steer_sign_reward_enable: bool = False
-    progress_teacher_near_align_progress_weight: float = 0.0
-    stage1_near_hard_curriculum_enable: bool = False
-    stage1_near_hard_curriculum_frac: float = 0.0
-
-
-@configclass
-class ForkliftPalletApproachToyotaGeoEdgeProgressTeacherCurveGuidanceEnvCfg(
-    ForkliftPalletApproachToyotaGeoEdgeProgressTeacherEnvCfg
-):
-    """Single-factor teacher repair: enable reference-curve guidance only."""
-
-    use_reference_trajectory: bool = True
-    traj_model: str = "root_path_first"
-    exp83_traj_goal_mode: str = "success_center"
-    exp83_target_center_family_mode: str = "success_center"
-
-    progress_teacher_curve_guidance_enable: bool = True
-    progress_teacher_curve_guidance_weight: float = 18.0
-    progress_teacher_curve_distance_sigma_m: float = 0.35
-    progress_teacher_curve_yaw_sigma_deg: float = 15.0
-    progress_teacher_curve_progress_weight: float = 4.0
-    progress_teacher_curve_near_gate_m: float = 2.2
-    progress_teacher_curve_near_gate_ramp_m: float = 0.8
-
-
-@configclass
-class ForkliftPalletApproachToyotaGeoEdgeProgressTeacherRecoveryFixEnvCfg(
-    ForkliftPalletApproachToyotaGeoEdgeProgressTeacherCurveGuidanceEnvCfg
-):
-    """Teacher recovery repair for near-distance, high-lateral-offset starts."""
-
-    stage1_near_hard_curriculum_enable: bool = True
-    stage1_near_hard_curriculum_frac: float = 0.35
-    stage1_near_hard_x_min_m: float = -3.35
-    stage1_near_hard_x_max_m: float = -3.00
-    stage1_near_hard_y_abs_min_m: float = 0.40
-    stage1_near_hard_y_abs_max_m: float = 0.60
-    stage1_near_hard_yaw_abs_min_deg: float = 8.0
-    stage1_near_hard_yaw_abs_max_deg: float = 14.32394487827058
-    stage1_near_hard_lateral_frac: float = 0.80
-    stage1_near_hard_positive_y_frac: float = 0.70
-
-    progress_teacher_curve_guidance_weight: float = 10.0
-    progress_teacher_curve_distance_sigma_m: float = 0.30
-    progress_teacher_curve_yaw_sigma_deg: float = 12.0
-    progress_teacher_curve_progress_weight: float = 2.2
-    progress_teacher_curve_near_gate_m: float = 2.1
-    progress_teacher_curve_near_gate_ramp_m: float = 0.8
-
-    progress_teacher_approach_weight: float = 8.0
-    progress_teacher_away_penalty_weight: float = 6.0
-    progress_teacher_aligned_approach_progress_weight: float = 58.0
-    progress_teacher_near_align_progress_weight: float = 34.0
-    progress_teacher_commit_progress_weight: float = 210.0
-    progress_teacher_commit_forward_weight: float = 0.38
-    progress_teacher_insert_weight: float = 150.0
-    progress_teacher_insert_potential_weight: float = 2.2
-    progress_teacher_hold_weight: float = 52.0
-    progress_teacher_stable_insert_weight: float = 0.55
-    progress_teacher_hold_alive_weight: float = 1.6
-    progress_teacher_hold_drop_penalty_weight: float = 3.5
-    progress_teacher_action_l2: float = -0.014
-
-    progress_teacher_near_dist_m: float = 1.35
-    progress_teacher_near_ramp_m: float = 0.75
-    progress_teacher_commit_dist_m: float = 0.68
-    progress_teacher_center_gate_m: float = 0.18
-    progress_teacher_yaw_gate_deg: float = 8.5
-    progress_teacher_insert_gate_floor: float = 0.04
-    progress_teacher_commit_center_sigma_m: float = 0.22
-    progress_teacher_commit_tip_sigma_m: float = 0.20
-    progress_teacher_commit_yaw_sigma_deg: float = 10.5
-    progress_teacher_min_commit_forward_action: float = 0.20
-
-    progress_teacher_forward_reward_requires_insert_progress: bool = False
-    progress_teacher_forward_insert_progress_start_norm: float = 0.0002
-    progress_teacher_forward_insert_progress_ramp_norm: float = 0.0025
-    progress_teacher_close_noinsert_gate_enable: bool = True
-    progress_teacher_close_noinsert_gate_dist_m: float = 0.62
-    progress_teacher_close_noinsert_insert_start_norm: float = 0.030
-    progress_teacher_close_noinsert_insert_ramp_norm: float = 0.12
-    progress_teacher_close_noinsert_positive_floor: float = 0.12
-    progress_teacher_close_noinsert_commit_floor: float = 0.78
-    progress_teacher_close_noinsert_penalty_weight: float = 0.45
-
-    progress_teacher_far_noinsert_penalty_enable: bool = True
-    progress_teacher_far_noinsert_penalty_weight: float = 0.12
-    progress_teacher_far_noinsert_dist_m: float = 0.42
-    progress_teacher_far_noinsert_ramp_m: float = 0.28
-    progress_teacher_far_noinsert_start_step: float = 110.0
-    progress_teacher_far_noinsert_step_ramp: float = 120.0
-    progress_teacher_far_noinsert_insert_start_norm: float = 0.06
-    progress_teacher_far_noinsert_insert_ramp_norm: float = 0.12
-
-    progress_teacher_pushfree_curriculum_enable: bool = True
-    progress_teacher_pushfree_curriculum_start_step: int = 2_500
-    progress_teacher_pushfree_curriculum_ramp_steps: int = 30_000
-    progress_teacher_push_sigma_start_m: float = 0.13
-    progress_teacher_push_sigma_m: float = 0.060
-    progress_teacher_clean_disp_start_m: float = 0.12
-    progress_teacher_clean_disp_m: float = 0.060
-    progress_teacher_success_disp_start_m: float = 0.10
-    progress_teacher_success_disp_m: float = 0.060
-    progress_teacher_push_penalty_start_weight: float = 1.8
-    progress_teacher_push_penalty: float = 8.0
-    progress_teacher_push_deadband_start_m: float = 0.030
-    progress_teacher_push_deadband_m: float = 0.010
-    progress_teacher_dirty_insert_weight_start: float = 2.0
-    progress_teacher_dirty_insert_penalty_weight: float = 28.0
-    progress_teacher_dirty_insert_disp_start_m: float = 0.065
-    progress_teacher_dirty_insert_disp_m: float = 0.030
-    progress_teacher_dirty_insert_min_norm: float = 0.16
-
-    progress_teacher_misaligned_insert_penalty_enable: bool = True
-    progress_teacher_misaligned_insert_penalty_weight: float = 1.4
-    progress_teacher_misaligned_insert_start_norm: float = 0.06
-    progress_teacher_misaligned_insert_ramp_norm: float = 0.16
-    progress_teacher_misaligned_insert_center_m: float = 0.17
-    progress_teacher_misaligned_insert_tip_m: float = 0.15
-    progress_teacher_misaligned_insert_yaw_deg: float = 8.0
-
-    preinsert_push_termination_enable: bool = True
-    preinsert_push_termination_m: float = 0.090
-    preinsert_push_termination_min_steps: int = 6
-    preinsert_push_termination_penalty_weight: float = 95.0
-    dirty_push_termination_enable: bool = True
-    dirty_push_termination_m: float = 0.125
-    dirty_push_termination_min_steps: int = 6
-    dirty_push_termination_penalty_weight: float = 160.0
-    progress_teacher_preinsert_termination_start_m: float = 0.18
-    progress_teacher_dirty_termination_start_m: float = 0.22
-    progress_teacher_dirty_insert_termination_enable: bool = True
-    progress_teacher_dirty_insert_termination_disp_m: float = 0.080
-    progress_teacher_dirty_insert_termination_min_norm: float = 0.35
-    progress_teacher_dirty_insert_termination_min_steps: int = 6
-    progress_teacher_dirty_insert_termination_penalty_weight: float = 120.0
-
-    progress_teacher_misaligned_forward_penalty_enable: bool = True
-    progress_teacher_misaligned_forward_penalty_weight: float = 1.1
-    progress_teacher_misaligned_forward_near_m: float = 0.82
-    progress_teacher_misaligned_forward_center_m: float = 0.18
-    progress_teacher_misaligned_forward_tip_m: float = 0.18
-    progress_teacher_misaligned_forward_yaw_deg: float = 8.0
-    progress_teacher_reverse_drive_penalty_enable: bool = True
-    progress_teacher_reverse_drive_penalty_weight: float = 0.50
-    progress_teacher_reverse_drive_penalty_min_dist_m: float = 0.10
-    progress_teacher_reverse_drive_penalty_ramp_m: float = 0.55
-
-    progress_teacher_steer_sign_reward_enable: bool = True
-    progress_teacher_steer_sign_weight: float = 0.36
-    progress_teacher_steer_wrong_sign_penalty_weight: float = 1.60
-    progress_teacher_steer_sign_idle_penalty_weight: float = 0.02
-    progress_teacher_steer_sign_center_weight: float = 1.20
-    progress_teacher_steer_sign_tip_weight: float = 0.70
-    progress_teacher_steer_sign_yaw_weight: float = 0.22
-    progress_teacher_steer_sign_deadband: float = 0.045
-    progress_teacher_steer_sign_ramp: float = 0.24
-    progress_teacher_steer_sign_near_m: float = 1.55
-    progress_teacher_steer_sign_near_ramp_m: float = 0.95
-    progress_teacher_steer_sign_stop_insert_norm: float = 0.55
-    progress_teacher_steer_sign_min_abs_action: float = 0.020
-    progress_teacher_steer_sign_reward_requires_approach: bool = True
-    progress_teacher_steer_sign_reward_drive_min: float = -0.02
-    progress_teacher_steer_sign_reward_drive_ramp: float = 0.18
-    progress_teacher_steer_sign_reward_progress_min: float = 0.0008
-    progress_teacher_steer_sign_reward_progress_ramp: float = 0.006
-    progress_teacher_steer_sign_reward_away_start: float = 0.0005
-    progress_teacher_steer_sign_reward_away_ramp: float = 0.006
-    progress_teacher_steer_sign_reward_gate_floor: float = 0.0
-
-
-@configclass
-class ForkliftPalletApproachToyotaGeoEdgeProgressTeacherV311RecoveryEnvCfg(
-    ForkliftPalletApproachToyotaGeoEdgeProgressTeacherEnvCfg
-):
-    """v3.11 reward with a narrow late near-lateral reset curriculum."""
-
-    stage1_near_hard_curriculum_enable: bool = True
-    stage1_near_hard_curriculum_frac: float = 0.25
-    stage1_near_hard_curriculum_start_step: int = 7_680
-    stage1_near_hard_curriculum_ramp_steps: int = 8_960
-    stage1_near_hard_x_min_m: float = -3.35
-    stage1_near_hard_x_max_m: float = -3.00
-    stage1_near_hard_y_abs_min_m: float = 0.40
-    stage1_near_hard_y_abs_max_m: float = 0.60
-    stage1_near_hard_yaw_abs_min_deg: float = 8.0
+    stage1_near_hard_yaw_abs_min_deg: float = 3.0
     stage1_near_hard_yaw_abs_max_deg: float = 14.32394487827058
     stage1_near_hard_lateral_frac: float = 1.0
     stage1_near_hard_positive_y_frac: float = 0.5
+    stage1_near_hard_positive_yaw_frac: float = 0.5
+    stage1_near_hard_opposite_yaw_frac: float = 0.75
 
 
 @configclass
-class ForkliftPalletApproachToyotaGeoEdgeProgressTeacherV311PosYFinetuneEnvCfg(
+class ForkliftPalletApproachToyotaGeoEdgeProgressTeacherV311LegacyLateNearLateralRecoveryEnvCfg(
     ForkliftPalletApproachToyotaGeoEdgeProgressTeacherEnvCfg
 ):
-    """Low-disruption v3.11 finetune focused on the positive-y near-lateral blind spot."""
-
-    stage1_near_hard_curriculum_enable: bool = True
-    stage1_near_hard_curriculum_frac: float = 0.12
-    stage1_near_hard_curriculum_start_step: int = 0
-    stage1_near_hard_curriculum_ramp_steps: int = 2_560
-    stage1_near_hard_x_min_m: float = -3.30
-    stage1_near_hard_x_max_m: float = -3.00
-    stage1_near_hard_y_abs_min_m: float = 0.48
-    stage1_near_hard_y_abs_max_m: float = 0.60
-    stage1_near_hard_yaw_abs_min_deg: float = 3.0
-    stage1_near_hard_yaw_abs_max_deg: float = 14.32394487827058
-    stage1_near_hard_lateral_frac: float = 1.0
-    stage1_near_hard_positive_y_frac: float = 0.9
-    stage1_near_hard_positive_yaw_frac: float = 0.25
-
-    progress_teacher_near_align_progress_weight: float = 10.0
-    progress_teacher_aligned_approach_progress_weight: float = 66.0
-    progress_teacher_misaligned_forward_penalty_weight: float = 1.45
-    progress_teacher_pushfree_curriculum_enable: bool = False
-
-
-@configclass
-class ForkliftPalletApproachToyotaGeoEdgeProgressTeacherV311OppYawFinetuneEnvCfg(
-    ForkliftPalletApproachToyotaGeoEdgeProgressTeacherEnvCfg
-):
-    """Narrow v3.11 finetune for near-lateral starts with opposite yaw sign."""
+    """Preserve the v3.11 0-400 window, then repair near-lateral recovery."""
 
     stage1_near_hard_curriculum_enable: bool = True
     stage1_near_hard_curriculum_frac: float = 0.08
-    stage1_near_hard_curriculum_start_step: int = 0
-    stage1_near_hard_curriculum_ramp_steps: int = 1_280
+    stage1_near_hard_curriculum_start_step: int = 25_600
+    stage1_near_hard_curriculum_ramp_steps: int = 12_800
     stage1_near_hard_x_min_m: float = -3.28
     stage1_near_hard_x_max_m: float = -3.00
-    stage1_near_hard_y_abs_min_m: float = 0.42
+    stage1_near_hard_y_abs_min_m: float = 0.40
     stage1_near_hard_y_abs_max_m: float = 0.60
-    stage1_near_hard_yaw_abs_min_deg: float = 3.0
+    stage1_near_hard_yaw_abs_min_deg: float = 0.0
     stage1_near_hard_yaw_abs_max_deg: float = 14.32394487827058
     stage1_near_hard_lateral_frac: float = 1.0
-    stage1_near_hard_positive_y_frac: float = 0.62
+    stage1_near_hard_positive_y_frac: float = 0.5
     stage1_near_hard_positive_yaw_frac: float = 0.5
-    stage1_near_hard_opposite_yaw_frac: float = 1.0
+    stage1_near_hard_opposite_yaw_frac: float = 0.50
 
-    progress_teacher_pushfree_curriculum_enable: bool = False
-    progress_teacher_misaligned_forward_penalty_weight: float = 1.22
-    progress_teacher_near_align_progress_weight: float = 7.0
-
-
-@configclass
-class ForkliftPalletApproachToyotaGeoEdgeProgressTeacherV311GuardedEvalEnvCfg(
-    ForkliftPalletApproachToyotaGeoEdgeProgressTeacherEnvCfg
-):
-    """v3.11 teacher with a narrow geometric pre-insert recovery guard."""
-
-    preinsert_action_guard_enable: bool = True
-    preinsert_action_guard_stateful_enable: bool = True
-    preinsert_action_guard_trigger_dist_m: float = 0.70
-    preinsert_action_guard_release_dist_m: float = 0.90
-    preinsert_action_guard_center_m: float = 0.20
-    preinsert_action_guard_tip_m: float = 0.14
-    preinsert_action_guard_yaw_deg: float = 6.0
-    preinsert_action_guard_insert_frac_max: float = 0.22
-    preinsert_action_guard_max_forward_action: float = 0.0
-    preinsert_action_guard_force_reverse: bool = True
-    preinsert_action_guard_reverse_action: float = 0.24
-    preinsert_action_guard_steer_to_reduce_error: bool = True
-    preinsert_action_guard_steer_action: float = 0.42
-    preinsert_action_guard_center_steer_weight: float = 1.0
-    preinsert_action_guard_yaw_steer_weight: float = 0.5
-
-
-@configclass
-class ForkliftPalletApproachToyotaGeoEdgeProgressTeacherV311PosYSlowGuardEvalEnvCfg(
-    ForkliftPalletApproachToyotaGeoEdgeProgressTeacherEnvCfg
-):
-    """v3.11 teacher with positive-y near-misalignment forward limiting only."""
-
-    preinsert_action_guard_enable: bool = True
-    preinsert_action_guard_stateful_enable: bool = True
-    preinsert_action_guard_lateral_sign: str = "positive"
-    preinsert_action_guard_lateral_sign_min_m: float = 0.10
-    preinsert_action_guard_trigger_dist_m: float = 0.55
-    preinsert_action_guard_release_dist_m: float = 0.78
-    preinsert_action_guard_center_m: float = 0.12
-    preinsert_action_guard_tip_m: float = 0.08
-    preinsert_action_guard_yaw_deg: float = 7.0
-    preinsert_action_guard_insert_frac_max: float = 0.88
-    preinsert_action_guard_max_forward_action: float = 0.30
-    preinsert_action_guard_force_reverse: bool = False
-    preinsert_action_guard_steer_to_reduce_error: bool = False
-
-
-@configclass
-class ForkliftPalletApproachToyotaGeoEdgeProgressTeacherV311OneShotRescueEvalEnvCfg(
-    ForkliftPalletApproachToyotaGeoEdgeProgressTeacherEnvCfg
-):
-    """v3.11 teacher with one-shot privileged near-lateral recovery.
-
-    The loaded actor still handles normal approach.  When the fork is very near
-    the pallet mouth with large lateral error and opposite yaw sign, the teacher
-    performs one short reverse-steer recovery window, then hands control back to
-    the actor.  This targets the current push-no-insert failure bucket without
-    enabling a broad scripted controller.
-    """
-
-    preinsert_action_guard_enable: bool = True
-    preinsert_action_guard_stateful_enable: bool = True
-    preinsert_action_guard_opposite_yaw_only: bool = True
-    preinsert_action_guard_trigger_dist_m: float = 0.70
-    preinsert_action_guard_release_dist_m: float = 0.90
-    preinsert_action_guard_center_m: float = 0.18
-    preinsert_action_guard_tip_m: float = 0.12
-    preinsert_action_guard_yaw_deg: float = 6.0
-    preinsert_action_guard_insert_frac_max: float = 0.25
-    preinsert_action_guard_max_forward_action: float = 0.0
-    preinsert_action_guard_force_reverse: bool = True
-    preinsert_action_guard_reverse_action: float = 0.30
-    preinsert_action_guard_steer_to_reduce_error: bool = True
-    preinsert_action_guard_steer_action: float = 0.85
-    preinsert_action_guard_reverse_steer_flip: bool = True
-    preinsert_action_guard_center_steer_weight: float = 0.35
-    preinsert_action_guard_tip_steer_weight: float = 0.20
-    preinsert_action_guard_yaw_steer_weight: float = 1.0
-    preinsert_action_guard_once_per_episode: bool = True
-    preinsert_action_guard_max_steps: int = 24
-    preinsert_action_guard_release_on_not_eligible: bool = False
-
-
-@configclass
-class ForkliftPalletApproachToyotaProgressStudentCleanViewEnvCfg(
-    ForkliftPalletApproachToyotaGeoEdgeProgressTeacherEnvCfg
-):
-    """Visual student task matched to the progress-teacher collection MDP.
-
-    Teacher collection uses the progress-teacher dynamics and reset envelope
-    while recording CleanView RGB.  The student must be evaluated in the same
-    task family; only the observation interface changes from privileged 21D
-    geometry to Toyota dual-camera RGB plus 5D proprio.
-    """
-
-    action_space: int = 2
-    use_camera: bool = True
-    use_dual_cameras: bool = True
-    use_asymmetric_critic: bool = True
-    enable_geo_edge_obs: bool = False
-    geo_edge_record_cameras: bool = False
-    observation_space = {
-        "image_left": [3, 224, 224],
-        "image_right": [3, 224, 224],
-        "proprio": 5,
-    }
-    state_space = 0
-
-    # Visual policies must train on the current camera frame, not RTX temporal
-    # reconstruction history.  DLSS/DLAA/TAA can smear moving forks/pallet edges
-    # and create ghost-like structures that look like multi-env leakage.
-    sim: SimulationCfg = SimulationCfg(
-        dt=1 / 120,
-        render_interval=4,
-        render=RenderCfg(
-            antialiasing_mode="Off",
-            enable_dlssg=False,
-            enable_dl_denoiser=False,
-            samples_per_pixel=1,
-        ),
-    )
-
-    camera_width: int = 224
-    camera_height: int = 224
-    dual_camera_width: int = 224
-    dual_camera_height: int = 224
-    dual_camera_hfov_deg: float = 45.0
-    dual_camera_left_pos_local: tuple[float, float, float] = (135.0, 75.0, 120.0)
-    dual_camera_right_pos_local: tuple[float, float, float] = (135.0, -75.0, 120.0)
-    dual_camera_left_rpy_local_deg: tuple[float, float, float] = (0.0, 55.0, -16.0)
-    dual_camera_right_rpy_local_deg: tuple[float, float, float] = (0.0, 55.0, 16.0)
-    dual_camera_near_clip_m: float = 0.1
-    dual_camera_far_clip_m: float = 8.0
-
-    scene: InteractiveSceneCfg = InteractiveSceneCfg(
-        num_envs=128,
-        env_spacing=20.0,
-        replicate_physics=True,
-        filter_collisions=True,
-        clone_in_fabric=False,
-    )
-    vision_room_enable: bool = True
-    rerender_on_reset: bool = False
-
-
-@configclass
-class ForkliftPalletApproachDirectVisualInsertionCleanViewEnvCfg(
-    ForkliftPalletApproachToyotaProgressStudentCleanViewEnvCfg
-):
-    """Direct CleanView RGB insertion-RL task.
-
-    This keeps the verified single-process 16-env CleanView45 isolation setup
-    and the RGB/proprio actor interface, but treats the previous ProgressStudent
-    task as a reward/curriculum ablation.  Rewards may still use privileged
-    geometry for progress/reference/insert/push-free signals; teacher action
-    labels are not part of this task.
-    """
-
-    # Lower the physical authority so a bounded actor cannot learn by hammering
-    # the pallet mouth at full throttle.
-    wheel_speed_rad_s: float = 12.0
-    steer_angle_rad: float = 0.45
-
-    # Remove direct incentives for saturated forward drive.
-    progress_teacher_commit_forward_weight: float = 0.0
-    progress_teacher_mouth_stall_penalty: float = 0.0
-    progress_teacher_min_commit_forward_action: float = 0.0
-
-    # Make action health part of the reward surface, not just an eval note.
-    progress_teacher_action_l2: float = -0.12
-
-    # First learn insertion behavior, then tighten push-free constraints.
-    progress_teacher_pushfree_curriculum_start_step: int = 20_000
-    progress_teacher_pushfree_curriculum_ramp_steps: int = 60_000
-    progress_teacher_clean_disp_start_m: float = 0.14
-    progress_teacher_clean_disp_m: float = 0.08
-    progress_teacher_success_disp_start_m: float = 0.12
-    progress_teacher_success_disp_m: float = 0.08
-
-    # Stage one keeps dirty/push feedback soft. Hard resets made the previous
-    # visual PPO brittle around contact and encouraged action collapse.
-    preinsert_push_termination_enable: bool = False
-    dirty_push_termination_enable: bool = False
-    progress_teacher_dirty_insert_termination_enable: bool = False
-
-
-@configclass
-class ForkliftPalletApproachDirectVisualInsertionCleanViewV3EnvCfg(
-    ForkliftPalletApproachDirectVisualInsertionCleanViewEnvCfg
-):
-    """Push-gated direct CleanView RGB insertion-RL task.
-
-    v2 proved that the visual PPO can find contact and insertion-like signals,
-    but it also exposed a shortcut: move the pallet first, then collect insert
-    reward.  v3 keeps the same direct RGB/proprio actor path and changes only
-    the reward/curriculum surface so pushed insertions stop paying early.
-    """
-
-    # Keep v2's bounded actor interface and reduced physical authority.
-    wheel_speed_rad_s: float = 12.0
-    steer_angle_rad: float = 0.45
-
-    # Avoid direct "just drive forward" incentives.
-    progress_teacher_commit_forward_weight: float = 0.0
-    progress_teacher_mouth_stall_penalty: float = 0.0
-    progress_teacher_min_commit_forward_action: float = 0.0
-
-    # v2 model_200 was too conservative while the final checkpoint found a push
-    # shortcut, so keep action cost meaningful but slightly less freezing.
-    progress_teacher_action_l2: float = -0.08
-
-    # Reduce the payoff for insertion deltas so push penalties can dominate
-    # when contact is wrong.  Commit progress remains useful only through the
-    # same clean/push gates in env.py.
-    progress_teacher_insert_weight: float = 95.0
-    progress_teacher_insert_potential_weight: float = 1.6
-    progress_teacher_commit_progress_weight: float = 160.0
-
-    # Push-free constraints are active from the beginning.  This turns v2's
-    # late curriculum into a short warm-up instead of an 800-iteration hope.
-    progress_teacher_pushfree_curriculum_start_step: int = 0
-    progress_teacher_pushfree_curriculum_ramp_steps: int = 10_000
-    progress_teacher_push_sigma_start_m: float = 0.09
-    progress_teacher_push_sigma_m: float = 0.055
-    progress_teacher_clean_disp_start_m: float = 0.09
-    progress_teacher_clean_disp_m: float = 0.06
-    progress_teacher_success_disp_start_m: float = 0.08
-    progress_teacher_success_disp_m: float = 0.06
-    progress_teacher_push_penalty_start_weight: float = 3.0
-    progress_teacher_push_penalty: float = 8.0
-    progress_teacher_push_deadband_start_m: float = 0.025
-    progress_teacher_push_deadband_m: float = 0.015
-
-    # Dirty insertion is now an early negative signal, not something that turns
-    # on after the policy has already learned to shove the pallet.
-    progress_teacher_dirty_insert_penalty_weight: float = 28.0
-    progress_teacher_dirty_insert_weight_start: float = 10.0
-    progress_teacher_dirty_insert_disp_start_m: float = 0.04
-    progress_teacher_dirty_insert_disp_m: float = 0.035
-    progress_teacher_dirty_insert_min_norm: float = 0.18
-    progress_teacher_dirty_insert_termination_enable: bool = True
-    progress_teacher_dirty_insert_termination_disp_m: float = 0.075
-    progress_teacher_dirty_insert_termination_min_norm: float = 0.22
-    progress_teacher_dirty_insert_termination_min_steps: int = 8
-    progress_teacher_dirty_insert_termination_penalty_weight: float = 110.0
-
-    # Re-enable hard resets only for clear push shortcuts.  These thresholds are
-    # above tiny contact jitter but below v2's successful-push regime.
-    preinsert_push_termination_enable: bool = True
-    preinsert_push_termination_m: float = 0.09
-    preinsert_push_termination_min_steps: int = 8
-    preinsert_push_termination_penalty_weight: float = 90.0
-    dirty_push_termination_enable: bool = True
-    dirty_push_termination_m: float = 0.12
-    dirty_push_termination_min_steps: int = 8
-    dirty_push_termination_penalty_weight: float = 140.0
-    progress_teacher_preinsert_termination_start_m: float = 0.11
-    progress_teacher_dirty_termination_start_m: float = 0.14
-
-
-@configclass
-class ForkliftPalletApproachDirectVisualInsertionCleanViewV31EnvCfg(
-    ForkliftPalletApproachDirectVisualInsertionCleanViewV3EnvCfg
-):
-    """v3.1: direct RGB insertion PPO with explicit steering-sign shaping.
-
-    v3 blocked the large-push shortcut, but eval showed both initial-y groups
-    steering in the same positive direction.  This version keeps the push gates
-    and adds a privileged geometric reward term for left/right correction sign;
-    it still uses no teacher action labels or BC targets.
-    """
-
-    # Give the actor a little more room to move now that steering sign has a
-    # dedicated corrective signal.
-    progress_teacher_action_l2: float = -0.05
-
-    progress_teacher_steer_sign_reward_enable: bool = True
-    progress_teacher_steer_sign_weight: float = 0.45
-    progress_teacher_steer_wrong_sign_penalty_weight: float = 0.85
-    progress_teacher_steer_sign_center_weight: float = 1.0
-    progress_teacher_steer_sign_tip_weight: float = 0.45
-    progress_teacher_steer_sign_yaw_weight: float = 0.35
-    progress_teacher_steer_sign_center_scale_m: float = 0.35
-    progress_teacher_steer_sign_tip_scale_m: float = 0.45
-    progress_teacher_steer_sign_yaw_scale_deg: float = 12.0
-    progress_teacher_steer_sign_deadband: float = 0.07
-    progress_teacher_steer_sign_ramp: float = 0.35
-    progress_teacher_steer_sign_near_m: float = 1.05
-    progress_teacher_steer_sign_near_ramp_m: float = 0.75
-    progress_teacher_steer_sign_stop_insert_norm: float = 0.45
-    progress_teacher_steer_sign_min_abs_action: float = 0.02
-
-
-@configclass
-class ForkliftPalletApproachDirectVisualInsertionCleanViewV32EnvCfg(
-    ForkliftPalletApproachDirectVisualInsertionCleanViewV31EnvCfg
-):
-    """v3.2: trainable visual backbone and stronger steering-sign correction.
-
-    v3.1 fixed the drive saturation shortcut but collapsed both initial-y
-    groups to positive steering.  This version keeps the direct RGB/proprio PPO
-    path and focuses the next run on visual sign learning and action health.
-    """
-
-    # Avoid turning the first v3.2 run into a termination-avoidance problem.
-    preinsert_push_termination_enable: bool = False
-    dirty_push_termination_enable: bool = False
-    progress_teacher_dirty_insert_termination_enable: bool = False
-
-    # Keep push feedback soft while the actor learns left/right correction.
-    progress_teacher_pushfree_curriculum_start_step: int = 12_000
-    progress_teacher_pushfree_curriculum_ramp_steps: int = 36_000
-    progress_teacher_push_sigma_start_m: float = 0.11
-    progress_teacher_push_sigma_m: float = 0.060
-    progress_teacher_clean_disp_start_m: float = 0.11
-    progress_teacher_clean_disp_m: float = 0.070
-    progress_teacher_success_disp_start_m: float = 0.10
-    progress_teacher_success_disp_m: float = 0.070
-    progress_teacher_push_penalty_start_weight: float = 2.0
-    progress_teacher_push_penalty: float = 6.0
-
-    # Stronger than v3.1 because eval showed a hard one-sided steering mode.
-    progress_teacher_action_l2: float = -0.06
-    progress_teacher_steer_sign_weight: float = 0.95
-    progress_teacher_steer_wrong_sign_penalty_weight: float = 2.25
-    progress_teacher_steer_sign_center_weight: float = 1.15
-    progress_teacher_steer_sign_tip_weight: float = 0.65
-    progress_teacher_steer_sign_yaw_weight: float = 0.25
-    progress_teacher_steer_sign_deadband: float = 0.04
-    progress_teacher_steer_sign_ramp: float = 0.22
-    progress_teacher_steer_sign_near_m: float = 1.25
-    progress_teacher_steer_sign_near_ramp_m: float = 0.95
-    progress_teacher_steer_sign_stop_insert_norm: float = 0.55
-    progress_teacher_steer_sign_min_abs_action: float = 0.015
-
-
-@configclass
-class ForkliftPalletApproachDirectVisualInsertionCleanViewV33EnvCfg(
-    ForkliftPalletApproachDirectVisualInsertionCleanViewV32EnvCfg
-):
-    """v3.3: v3.2 vision/sign fixes plus early push-shortcut guards."""
-
-    # v3.2 showed signed RGB is learnable, but with hard dirty guards disabled
-    # the policy immediately found a pallet-push insertion shortcut.
-    preinsert_push_termination_enable: bool = True
-    preinsert_push_termination_m: float = 0.12
-    preinsert_push_termination_min_steps: int = 8
-    preinsert_push_termination_penalty_weight: float = 120.0
-    dirty_push_termination_enable: bool = True
-    dirty_push_termination_m: float = 0.16
-    dirty_push_termination_min_steps: int = 8
-    dirty_push_termination_penalty_weight: float = 180.0
-    progress_teacher_dirty_insert_termination_enable: bool = True
-    progress_teacher_dirty_insert_termination_disp_m: float = 0.10
-    progress_teacher_dirty_insert_termination_min_norm: float = 0.20
-    progress_teacher_dirty_insert_termination_min_steps: int = 8
-    progress_teacher_dirty_insert_termination_penalty_weight: float = 140.0
-
-    # Keep the clean curriculum slower than v3.1, but no longer soft enough to
-    # let 20-iteration pallet displacement grow into the 0.5 m range.
-    progress_teacher_pushfree_curriculum_start_step: int = 4_000
-    progress_teacher_pushfree_curriculum_ramp_steps: int = 24_000
-    progress_teacher_push_sigma_start_m: float = 0.095
-    progress_teacher_push_sigma_m: float = 0.060
-    progress_teacher_clean_disp_start_m: float = 0.10
-    progress_teacher_clean_disp_m: float = 0.070
-    progress_teacher_success_disp_start_m: float = 0.095
-    progress_teacher_success_disp_m: float = 0.070
-    progress_teacher_push_penalty_start_weight: float = 4.0
-    progress_teacher_push_penalty: float = 9.0
-    progress_teacher_push_deadband_start_m: float = 0.018
-    progress_teacher_push_deadband_m: float = 0.012
-    progress_teacher_dirty_insert_weight_start: float = 16.0
-    progress_teacher_dirty_insert_penalty_weight: float = 34.0
-    progress_teacher_dirty_insert_disp_start_m: float = 0.035
-    progress_teacher_dirty_insert_disp_m: float = 0.030
-    progress_teacher_preinsert_termination_start_m: float = 0.14
-    progress_teacher_dirty_termination_start_m: float = 0.18
-
-    # Reduce the reward pressure to shove forward once close to the mouth.
-    progress_teacher_insert_weight: float = 70.0
-    progress_teacher_insert_potential_weight: float = 1.2
-    progress_teacher_commit_progress_weight: float = 110.0
-    progress_teacher_aligned_approach_progress_weight: float = 80.0
-    progress_teacher_misaligned_forward_penalty_weight: float = 2.0
-    progress_teacher_misaligned_forward_near_m: float = 0.70
-    progress_teacher_misaligned_forward_center_m: float = 0.12
-    progress_teacher_misaligned_forward_tip_m: float = 0.12
-    progress_teacher_misaligned_forward_yaw_deg: float = 6.0
-
-
-@configclass
-class ForkliftPalletApproachDirectVisualInsertionCleanViewV34EnvCfg(
-    ForkliftPalletApproachDirectVisualInsertionCleanViewV33EnvCfg
-):
-    """v3.4: keep push guards, but stop rewarding clean non-insertion."""
-
-    # v3.3 became clean by staying away from the pallet mouth.  Rebalance the
-    # dense reward toward closing distance before contact while keeping the
-    # pushed-pallet shortcut guarded.
-    progress_teacher_approach_weight: float = 16.0
-    progress_teacher_away_penalty_weight: float = 14.0
-    progress_teacher_aligned_approach_progress_weight: float = 135.0
-    progress_teacher_commit_progress_weight: float = 145.0
-    progress_teacher_insert_weight: float = 85.0
-    progress_teacher_insert_potential_weight: float = 1.0
-    progress_teacher_align_potential_weight: float = 0.025
-    progress_teacher_distance_penalty: float = 0.030
-    progress_teacher_action_l2: float = -0.04
-
-    # Let approach/steering signals remain active farther out so the policy
-    # cannot get paid by simply sitting in a visually aligned but distant pose.
-    progress_teacher_near_dist_m: float = 1.80
-    progress_teacher_near_ramp_m: float = 0.90
-    progress_teacher_commit_dist_m: float = 0.62
-    progress_teacher_center_gate_m: float = 0.26
-    progress_teacher_yaw_gate_deg: float = 11.0
-    progress_teacher_commit_center_sigma_m: float = 0.22
-    progress_teacher_commit_tip_sigma_m: float = 0.20
-    progress_teacher_commit_yaw_sigma_deg: float = 11.5
-    progress_teacher_steer_sign_near_m: float = 1.80
-    progress_teacher_steer_sign_near_ramp_m: float = 1.10
-
-    # Keep v3.3's hard shortcut boundary but make the early soft curriculum a
-    # little less avoidance-biased, then tighten to the same clean target.
-    progress_teacher_pushfree_curriculum_start_step: int = 8_000
-    progress_teacher_pushfree_curriculum_ramp_steps: int = 28_000
-    progress_teacher_push_sigma_start_m: float = 0.115
-    progress_teacher_push_sigma_m: float = 0.060
-    progress_teacher_clean_disp_start_m: float = 0.115
-    progress_teacher_clean_disp_m: float = 0.070
-    progress_teacher_success_disp_start_m: float = 0.105
-    progress_teacher_success_disp_m: float = 0.070
-    progress_teacher_push_penalty_start_weight: float = 2.2
-    progress_teacher_push_penalty: float = 8.0
-    progress_teacher_push_deadband_start_m: float = 0.024
-    progress_teacher_push_deadband_m: float = 0.012
-    progress_teacher_dirty_insert_weight_start: float = 10.0
-    progress_teacher_dirty_insert_penalty_weight: float = 32.0
-    progress_teacher_dirty_insert_disp_start_m: float = 0.045
-    progress_teacher_dirty_insert_disp_m: float = 0.030
-    progress_teacher_preinsert_termination_start_m: float = 0.15
-    progress_teacher_dirty_termination_start_m: float = 0.19
-
-
-@configclass
-class ForkliftPalletApproachDirectVisualInsertionCleanViewV35EnvCfg(
-    ForkliftPalletApproachDirectVisualInsertionCleanViewV34EnvCfg
-):
-    """v3.5: teacher-reference reset curriculum plus insertion-dominant reward.
-
-    This keeps direct visual PPO: teacher actions are not supervised or replayed.
-    The teacher is used only as a geometric reference for reset states that expose
-    pallet edges, mouth alignment, pre-insert, and partial-insert views early.
-    """
-
-    teacher_reference_reset_enable: bool = True
-    teacher_reference_reset_start_step: int = 0
-    teacher_reference_reset_ramp_steps: int = 45_000
-    teacher_reference_reset_mix_start: float = 0.88
-    teacher_reference_reset_mix_end: float = 0.32
-    teacher_reference_edge_phase_prob: float = 0.18
-    teacher_reference_mouth_phase_prob: float = 0.28
-    teacher_reference_preinsert_phase_prob: float = 0.34
-    teacher_reference_partial_insert_phase_prob: float = 0.20
-    teacher_reference_edge_x_min_m: float = -3.95
-    teacher_reference_edge_x_max_m: float = -3.55
-    teacher_reference_edge_y_abs_min_m: float = 0.34
-    teacher_reference_edge_y_abs_max_m: float = 0.58
-    teacher_reference_edge_yaw_deg: float = 10.0
-    teacher_reference_mouth_x_min_m: float = -3.55
-    teacher_reference_mouth_x_max_m: float = -3.25
-    teacher_reference_mouth_y_abs_m: float = 0.18
-    teacher_reference_mouth_yaw_deg: float = 6.0
-    teacher_reference_preinsert_x_min_m: float = -3.12
-    teacher_reference_preinsert_x_max_m: float = -2.98
-    teacher_reference_preinsert_y_abs_m: float = 0.08
-    teacher_reference_preinsert_yaw_deg: float = 3.0
-    teacher_reference_partial_insert_x_min_m: float = -2.88
-    teacher_reference_partial_insert_x_max_m: float = -2.70
-    teacher_reference_partial_insert_y_abs_m: float = 0.05
-    teacher_reference_partial_insert_yaw_deg: float = 2.0
-
-    # V34 overpaid clean approach. V35 keeps approach useful but stops paying
-    # near-mouth hovering unless insertion depth starts increasing.
-    progress_teacher_close_noinsert_gate_enable: bool = True
-    progress_teacher_close_noinsert_gate_dist_m: float = 0.58
-    progress_teacher_close_noinsert_insert_start_norm: float = 0.03
-    progress_teacher_close_noinsert_insert_ramp_norm: float = 0.12
-    progress_teacher_close_noinsert_positive_floor: float = 0.12
-    progress_teacher_close_noinsert_commit_floor: float = 0.55
-    progress_teacher_close_noinsert_penalty_weight: float = 0.35
-
-    progress_teacher_approach_weight: float = 11.0
-    progress_teacher_aligned_approach_progress_weight: float = 85.0
-    progress_teacher_commit_progress_weight: float = 190.0
-    progress_teacher_insert_weight: float = 180.0
-    progress_teacher_insert_potential_weight: float = 4.0
-    progress_teacher_hold_weight: float = 55.0
-    progress_teacher_align_potential_weight: float = 0.010
-    progress_teacher_distance_penalty: float = 0.045
-    progress_teacher_action_l2: float = -0.035
-    rew_success: float = 220.0
-    rew_success_time: float = 50.0
-
-    progress_teacher_commit_dist_m: float = 0.72
-    progress_teacher_center_gate_m: float = 0.22
-    progress_teacher_yaw_gate_deg: float = 9.0
-    progress_teacher_commit_center_sigma_m: float = 0.18
-    progress_teacher_commit_tip_sigma_m: float = 0.16
-    progress_teacher_commit_yaw_sigma_deg: float = 9.0
-    progress_teacher_insert_gate_floor: float = 0.08
-
-    progress_teacher_pushfree_curriculum_start_step: int = 0
-    progress_teacher_pushfree_curriculum_ramp_steps: int = 18_000
-    progress_teacher_push_sigma_start_m: float = 0.10
-    progress_teacher_push_sigma_m: float = 0.055
-    progress_teacher_clean_disp_start_m: float = 0.10
-    progress_teacher_clean_disp_m: float = 0.060
-    progress_teacher_success_disp_start_m: float = 0.095
-    progress_teacher_success_disp_m: float = 0.060
-    progress_teacher_push_penalty_start_weight: float = 3.0
-    progress_teacher_push_penalty: float = 10.0
-    progress_teacher_push_deadband_start_m: float = 0.020
-    progress_teacher_push_deadband_m: float = 0.010
-    progress_teacher_dirty_insert_weight_start: float = 14.0
-    progress_teacher_dirty_insert_penalty_weight: float = 42.0
-    progress_teacher_dirty_insert_disp_start_m: float = 0.040
-    progress_teacher_dirty_insert_disp_m: float = 0.028
-    preinsert_push_termination_enable: bool = True
-    preinsert_push_termination_m: float = 0.11
-    preinsert_push_termination_penalty_weight: float = 130.0
-    dirty_push_termination_enable: bool = True
-    dirty_push_termination_m: float = 0.15
-    dirty_push_termination_penalty_weight: float = 190.0
-    progress_teacher_dirty_insert_termination_enable: bool = True
-    progress_teacher_dirty_insert_termination_disp_m: float = 0.09
-    progress_teacher_dirty_insert_termination_min_norm: float = 0.22
-    progress_teacher_dirty_insert_termination_penalty_weight: float = 150.0
-    progress_teacher_preinsert_termination_start_m: float = 0.14
-    progress_teacher_dirty_termination_start_m: float = 0.18
-
-
-@configclass
-class ForkliftPalletApproachDirectVisualInsertionCleanViewV36EnvCfg(
-    ForkliftPalletApproachDirectVisualInsertionCleanViewV35EnvCfg
-):
-    """v3.6: keep near-insert curriculum longer and densify hold success.
-
-    V35 reached partial insertion but lost terminal success as reference resets
-    annealed.  This variant keeps pre-insert/partial-insert exposure high while
-    adding dense rewards for staying in the success gate before the sparse
-    terminal hold counter fires.
-    """
-
-    teacher_reference_reset_ramp_steps: int = 120_000
-    teacher_reference_reset_mix_start: float = 0.92
-    teacher_reference_reset_mix_end: float = 0.55
-    teacher_reference_edge_phase_prob: float = 0.10
-    teacher_reference_mouth_phase_prob: float = 0.20
-    teacher_reference_preinsert_phase_prob: float = 0.42
-    teacher_reference_partial_insert_phase_prob: float = 0.28
-    teacher_reference_mouth_y_abs_m: float = 0.15
-    teacher_reference_mouth_yaw_deg: float = 5.0
-    teacher_reference_preinsert_y_abs_m: float = 0.065
-    teacher_reference_preinsert_yaw_deg: float = 2.5
-    teacher_reference_partial_insert_x_min_m: float = -2.92
-    teacher_reference_partial_insert_x_max_m: float = -2.66
-    teacher_reference_partial_insert_y_abs_m: float = 0.045
-    teacher_reference_partial_insert_yaw_deg: float = 1.5
-
-    progress_teacher_insert_weight: float = 160.0
-    progress_teacher_insert_potential_weight: float = 2.4
-    progress_teacher_hold_weight: float = 85.0
-    progress_teacher_stable_insert_weight: float = 0.65
-    progress_teacher_hold_alive_weight: float = 2.2
-    progress_teacher_hold_drop_penalty_weight: float = 5.0
-    rew_success: float = 260.0
-    rew_success_time: float = 70.0
-
-    progress_teacher_close_noinsert_positive_floor: float = 0.08
-    progress_teacher_close_noinsert_commit_floor: float = 0.70
-    progress_teacher_close_noinsert_penalty_weight: float = 0.42
-
-    progress_teacher_pushfree_curriculum_ramp_steps: int = 50_000
-    progress_teacher_push_sigma_start_m: float = 0.115
-    progress_teacher_push_sigma_m: float = 0.060
-    progress_teacher_clean_disp_start_m: float = 0.115
-    progress_teacher_clean_disp_m: float = 0.065
-    progress_teacher_success_disp_start_m: float = 0.105
-    progress_teacher_success_disp_m: float = 0.065
-    progress_teacher_push_penalty_start_weight: float = 1.8
-    progress_teacher_push_penalty: float = 8.0
-    progress_teacher_push_deadband_start_m: float = 0.026
-    progress_teacher_push_deadband_m: float = 0.012
-    progress_teacher_dirty_insert_weight_start: float = 8.0
-    progress_teacher_dirty_insert_penalty_weight: float = 34.0
-    progress_teacher_dirty_insert_disp_start_m: float = 0.050
-    progress_teacher_dirty_insert_disp_m: float = 0.030
-    preinsert_push_termination_m: float = 0.13
-    preinsert_push_termination_penalty_weight: float = 105.0
-    dirty_push_termination_m: float = 0.17
-    dirty_push_termination_penalty_weight: float = 165.0
-    progress_teacher_dirty_insert_termination_disp_m: float = 0.10
-    progress_teacher_dirty_insert_termination_min_norm: float = 0.35
-    progress_teacher_preinsert_termination_start_m: float = 0.16
-    progress_teacher_dirty_termination_start_m: float = 0.20
-
-
-@configclass
-class ForkliftPalletApproachDirectVisualInsertionCleanViewV37EnvCfg(
-    ForkliftPalletApproachDirectVisualInsertionCleanViewV36EnvCfg
-):
-    """v3.7: signed visual approach curriculum after V36 steering collapse.
-
-    V36 proved that the actor can finish from very near reference states, but
-    eval showed the policy still turns mostly in one direction and often backs
-    away on normal Stage-A starts.  This variant shifts reference resets back
-    toward left/right mouth approach states and makes wrong/idle steering and
-    reverse escape visible in the reward logs.
-    """
-
-    teacher_reference_reset_ramp_steps: int = 160_000
-    teacher_reference_reset_mix_start: float = 0.90
-    teacher_reference_reset_mix_end: float = 0.48
-    teacher_reference_edge_phase_prob: float = 0.30
-    teacher_reference_mouth_phase_prob: float = 0.36
-    teacher_reference_preinsert_phase_prob: float = 0.24
-    teacher_reference_partial_insert_phase_prob: float = 0.10
-
-    teacher_reference_edge_x_min_m: float = -4.05
-    teacher_reference_edge_x_max_m: float = -3.45
-    teacher_reference_edge_y_abs_min_m: float = 0.28
-    teacher_reference_edge_y_abs_max_m: float = 0.62
-    teacher_reference_edge_yaw_deg: float = 13.0
-    teacher_reference_mouth_x_min_m: float = -3.65
-    teacher_reference_mouth_x_max_m: float = -3.22
-    teacher_reference_mouth_y_abs_m: float = 0.32
-    teacher_reference_mouth_yaw_deg: float = 9.0
-    teacher_reference_preinsert_x_min_m: float = -3.18
-    teacher_reference_preinsert_x_max_m: float = -2.94
-    teacher_reference_preinsert_y_abs_m: float = 0.16
-    teacher_reference_preinsert_yaw_deg: float = 5.0
-    teacher_reference_partial_insert_x_min_m: float = -2.88
-    teacher_reference_partial_insert_x_max_m: float = -2.68
-    teacher_reference_partial_insert_y_abs_m: float = 0.05
-    teacher_reference_partial_insert_yaw_deg: float = 2.0
-
-    progress_teacher_approach_weight: float = 13.0
-    progress_teacher_aligned_approach_progress_weight: float = 95.0
-    progress_teacher_near_align_progress_weight: float = 18.0
-    progress_teacher_commit_progress_weight: float = 145.0
-    progress_teacher_insert_weight: float = 150.0
-    progress_teacher_insert_potential_weight: float = 2.0
-    progress_teacher_hold_weight: float = 78.0
-    progress_teacher_stable_insert_weight: float = 0.55
-    progress_teacher_hold_alive_weight: float = 1.8
-    progress_teacher_hold_drop_penalty_weight: float = 4.0
-
-    progress_teacher_commit_dist_m: float = 0.82
-    progress_teacher_center_gate_m: float = 0.24
-    progress_teacher_yaw_gate_deg: float = 10.5
-    progress_teacher_commit_center_sigma_m: float = 0.22
-    progress_teacher_commit_tip_sigma_m: float = 0.20
-    progress_teacher_commit_yaw_sigma_deg: float = 10.5
-
-    progress_teacher_steer_sign_weight: float = 1.15
-    progress_teacher_steer_wrong_sign_penalty_weight: float = 3.20
-    progress_teacher_steer_sign_idle_penalty_weight: float = 0.18
-    progress_teacher_steer_sign_center_weight: float = 1.25
-    progress_teacher_steer_sign_tip_weight: float = 0.75
-    progress_teacher_steer_sign_yaw_weight: float = 0.20
-    progress_teacher_steer_sign_deadband: float = 0.025
-    progress_teacher_steer_sign_ramp: float = 0.18
-    progress_teacher_steer_sign_near_m: float = 2.05
-    progress_teacher_steer_sign_near_ramp_m: float = 1.35
-    progress_teacher_steer_sign_stop_insert_norm: float = 0.65
-    progress_teacher_steer_sign_min_abs_action: float = 0.012
-
-    progress_teacher_reverse_drive_penalty_enable: bool = True
-    progress_teacher_reverse_drive_penalty_weight: float = 0.42
-    progress_teacher_reverse_drive_penalty_min_dist_m: float = 0.16
-    progress_teacher_reverse_drive_penalty_ramp_m: float = 0.55
-
-    progress_teacher_misaligned_forward_penalty_weight: float = 2.4
-    progress_teacher_misaligned_forward_near_m: float = 0.82
-    progress_teacher_misaligned_forward_center_m: float = 0.13
-    progress_teacher_misaligned_forward_tip_m: float = 0.13
-    progress_teacher_misaligned_forward_yaw_deg: float = 6.5
-    progress_teacher_action_l2: float = -0.045
-
-
-@configclass
-class ForkliftPalletApproachDirectVisualInsertionCleanViewV38EnvCfg(
-    ForkliftPalletApproachDirectVisualInsertionCleanViewV37EnvCfg
-):
-    """v3.8: bind signed steering to forward progress.
-
-    V37 fixed the steering sign collapse but created a reward loophole: the
-    actor could back away from the pallet while collecting correct steering
-    sign reward.  V38 gates positive steer-sign reward by forward progress and
-    restores enough near-insert reference starts to keep insertion alive.
-    """
-
-    teacher_reference_reset_ramp_steps: int = 140_000
-    teacher_reference_reset_mix_start: float = 0.90
-    teacher_reference_reset_mix_end: float = 0.54
-    teacher_reference_edge_phase_prob: float = 0.18
-    teacher_reference_mouth_phase_prob: float = 0.30
-    teacher_reference_preinsert_phase_prob: float = 0.34
-    teacher_reference_partial_insert_phase_prob: float = 0.18
-
-    teacher_reference_edge_x_min_m: float = -3.95
-    teacher_reference_edge_x_max_m: float = -3.45
-    teacher_reference_edge_y_abs_min_m: float = 0.24
-    teacher_reference_edge_y_abs_max_m: float = 0.52
-    teacher_reference_edge_yaw_deg: float = 11.0
-    teacher_reference_mouth_x_min_m: float = -3.55
-    teacher_reference_mouth_x_max_m: float = -3.20
-    teacher_reference_mouth_y_abs_m: float = 0.24
-    teacher_reference_mouth_yaw_deg: float = 7.0
-    teacher_reference_preinsert_x_min_m: float = -3.14
-    teacher_reference_preinsert_x_max_m: float = -2.96
-    teacher_reference_preinsert_y_abs_m: float = 0.11
-    teacher_reference_preinsert_yaw_deg: float = 3.5
-    teacher_reference_partial_insert_x_min_m: float = -2.90
-    teacher_reference_partial_insert_x_max_m: float = -2.68
-    teacher_reference_partial_insert_y_abs_m: float = 0.045
-    teacher_reference_partial_insert_yaw_deg: float = 1.8
-
-    progress_teacher_away_penalty_weight: float = 22.0
-    progress_teacher_approach_weight: float = 18.0
-    progress_teacher_aligned_approach_progress_weight: float = 110.0
-    progress_teacher_near_align_progress_weight: float = 22.0
-    progress_teacher_commit_progress_weight: float = 175.0
-    progress_teacher_insert_weight: float = 170.0
-    progress_teacher_insert_potential_weight: float = 2.8
-    progress_teacher_hold_weight: float = 82.0
-    progress_teacher_stable_insert_weight: float = 0.60
-    progress_teacher_hold_alive_weight: float = 2.0
-
-    progress_teacher_commit_dist_m: float = 0.72
-    progress_teacher_center_gate_m: float = 0.22
-    progress_teacher_yaw_gate_deg: float = 9.5
-    progress_teacher_commit_center_sigma_m: float = 0.19
-    progress_teacher_commit_tip_sigma_m: float = 0.17
-    progress_teacher_commit_yaw_sigma_deg: float = 9.5
-
-    progress_teacher_steer_sign_weight: float = 0.72
-    progress_teacher_steer_wrong_sign_penalty_weight: float = 3.40
-    progress_teacher_steer_sign_idle_penalty_weight: float = 0.12
-    progress_teacher_steer_sign_near_m: float = 1.45
-    progress_teacher_steer_sign_near_ramp_m: float = 0.95
-    progress_teacher_steer_sign_stop_insert_norm: float = 0.55
-    progress_teacher_steer_sign_reward_requires_approach: bool = True
-    progress_teacher_steer_sign_reward_drive_min: float = -0.02
-    progress_teacher_steer_sign_reward_drive_ramp: float = 0.18
-    progress_teacher_steer_sign_reward_progress_min: float = 0.0002
-    progress_teacher_steer_sign_reward_progress_ramp: float = 0.004
-    progress_teacher_steer_sign_reward_away_start: float = 0.0005
-    progress_teacher_steer_sign_reward_away_ramp: float = 0.006
-    progress_teacher_steer_sign_reward_gate_floor: float = 0.03
-
-    progress_teacher_reverse_drive_penalty_weight: float = 0.95
-    progress_teacher_reverse_drive_penalty_min_dist_m: float = 0.08
-    progress_teacher_reverse_drive_penalty_ramp_m: float = 0.55
-
-    progress_teacher_misaligned_forward_penalty_weight: float = 2.1
-    progress_teacher_misaligned_forward_near_m: float = 0.74
-    progress_teacher_close_noinsert_commit_floor: float = 0.62
-    progress_teacher_close_noinsert_penalty_weight: float = 0.45
-    progress_teacher_action_l2: float = -0.045
-
-
-@configclass
-class ForkliftPalletApproachDirectVisualInsertionCleanViewV39EnvCfg(
-    ForkliftPalletApproachDirectVisualInsertionCleanViewV38EnvCfg
-):
-    """v3.9: preserve V38's best near-insert behavior.
-
-    V38 looked best around iteration 100, then drifted back into farther edge
-    episodes with low insertion.  This variant reduces far-edge sampling,
-    keeps preinsert/partial starts alive, and penalizes mature far/no-insert
-    episodes before they can dominate PPO updates.
-    """
-
-    teacher_reference_reset_ramp_steps: int = 180_000
-    teacher_reference_reset_mix_start: float = 0.92
-    teacher_reference_reset_mix_end: float = 0.62
-    teacher_reference_edge_phase_prob: float = 0.08
-    teacher_reference_mouth_phase_prob: float = 0.22
-    teacher_reference_preinsert_phase_prob: float = 0.42
-    teacher_reference_partial_insert_phase_prob: float = 0.28
-
-    teacher_reference_edge_x_min_m: float = -3.80
-    teacher_reference_edge_x_max_m: float = -3.42
-    teacher_reference_edge_y_abs_min_m: float = 0.18
-    teacher_reference_edge_y_abs_max_m: float = 0.42
-    teacher_reference_edge_yaw_deg: float = 9.0
-    teacher_reference_mouth_x_min_m: float = -3.45
-    teacher_reference_mouth_x_max_m: float = -3.18
-    teacher_reference_mouth_y_abs_m: float = 0.20
-    teacher_reference_mouth_yaw_deg: float = 6.0
-    teacher_reference_preinsert_x_min_m: float = -3.12
-    teacher_reference_preinsert_x_max_m: float = -2.95
-    teacher_reference_preinsert_y_abs_m: float = 0.095
-    teacher_reference_preinsert_yaw_deg: float = 3.0
-    teacher_reference_partial_insert_x_min_m: float = -2.92
-    teacher_reference_partial_insert_x_max_m: float = -2.66
-    teacher_reference_partial_insert_y_abs_m: float = 0.045
-    teacher_reference_partial_insert_yaw_deg: float = 1.6
-
-    progress_teacher_away_penalty_weight: float = 28.0
-    progress_teacher_approach_weight: float = 20.0
-    progress_teacher_aligned_approach_progress_weight: float = 125.0
-    progress_teacher_near_align_progress_weight: float = 26.0
-    progress_teacher_commit_progress_weight: float = 190.0
-    progress_teacher_insert_weight: float = 180.0
-    progress_teacher_insert_potential_weight: float = 3.1
-    progress_teacher_hold_weight: float = 92.0
-    progress_teacher_stable_insert_weight: float = 0.75
-    progress_teacher_hold_alive_weight: float = 2.4
-    progress_teacher_hold_drop_penalty_weight: float = 5.0
-    rew_success: float = 285.0
-    rew_success_time: float = 78.0
-
-    progress_teacher_commit_dist_m: float = 0.66
-    progress_teacher_center_gate_m: float = 0.21
-    progress_teacher_yaw_gate_deg: float = 9.0
-    progress_teacher_commit_center_sigma_m: float = 0.18
-    progress_teacher_commit_tip_sigma_m: float = 0.16
-    progress_teacher_commit_yaw_sigma_deg: float = 9.0
-
-    progress_teacher_far_noinsert_penalty_enable: bool = True
-    progress_teacher_far_noinsert_penalty_weight: float = 0.42
-    progress_teacher_far_noinsert_dist_m: float = 0.34
-    progress_teacher_far_noinsert_ramp_m: float = 0.18
-    progress_teacher_far_noinsert_start_step: float = 70.0
-    progress_teacher_far_noinsert_step_ramp: float = 80.0
-    progress_teacher_far_noinsert_insert_start_norm: float = 0.08
-    progress_teacher_far_noinsert_insert_ramp_norm: float = 0.12
-
-    progress_teacher_steer_sign_weight: float = 0.55
-    progress_teacher_steer_wrong_sign_penalty_weight: float = 3.10
-    progress_teacher_steer_sign_near_m: float = 1.20
-    progress_teacher_steer_sign_near_ramp_m: float = 0.80
-    progress_teacher_reverse_drive_penalty_weight: float = 1.10
-    progress_teacher_misaligned_forward_penalty_weight: float = 2.35
-    progress_teacher_misaligned_forward_near_m: float = 0.68
-
-    progress_teacher_close_noinsert_commit_floor: float = 0.58
-    progress_teacher_close_noinsert_penalty_weight: float = 0.52
-    progress_teacher_action_l2: float = -0.045
-
-
-@configclass
-class ForkliftPalletApproachDirectVisualInsertionCleanViewV40DirectEnvCfg(
-    ForkliftPalletApproachDirectVisualInsertionCleanViewV34EnvCfg
-):
-    """v4.0 direct baseline: smoke camera, no reference reset, push-strict reward.
-
-    This is the fair 500-iteration sanity check before any staged curriculum:
-    scratch direct visual PPO on the final Stage-A distribution, using the
-    verified smoke-style dual cameras and no teacher-reference start states.
-    """
-
-    scene: InteractiveSceneCfg = InteractiveSceneCfg(
-        num_envs=64,
-        env_spacing=20.0,
-        replicate_physics=True,
-        filter_collisions=True,
-        clone_in_fabric=False,
-    )
-
-    # Verified Toyota smoke-style dual cameras.  The local offsets are in cm
-    # because forklift_c.usd uses centimeter units for child prim transforms.
-    dual_camera_width: int = 224
-    dual_camera_height: int = 224
-    dual_camera_hfov_deg: float = 60.0
-    dual_camera_near_clip_m: float = 0.1
-    dual_camera_far_clip_m: float = 8.0
-    dual_camera_left_pos_local: tuple[float, float, float] = (120.0, 55.0, 150.0)
-    dual_camera_right_pos_local: tuple[float, float, float] = (120.0, -55.0, 150.0)
-    dual_camera_left_rpy_local_deg: tuple[float, float, float] = (0.0, 68.0, -8.0)
-    dual_camera_right_rpy_local_deg: tuple[float, float, float] = (0.0, 68.0, 8.0)
-    vision_room_enable: bool = True
-    vision_room_ceiling_enable: bool = False
-    vision_room_floor_enable: bool = True
-    vision_room_color: tuple[float, float, float] = (0.92, 0.92, 0.88)
-    rerender_on_reset: bool = False
-
-    # Final direct baseline distribution.  No teacher/reference starts and no
-    # near-start mixture, so eval and train are not inflated by easy resets.
-    teacher_reference_reset_enable: bool = False
-    teacher_reference_reset_mix_start: float = 0.0
-    teacher_reference_reset_mix_end: float = 0.0
-    stage1_use_triangular_visible_init: bool = False
-    stage1_init_x_min_m: float = -4.0
-    stage1_init_x_max_m: float = -3.0
-    stage1_init_y_min_m: float = -0.6
-    stage1_init_y_max_m: float = 0.6
-    stage1_init_yaw_deg_min: float = -14.32394487827058
-    stage1_init_yaw_deg_max: float = 14.32394487827058
-
-    # Remove V39's main loophole: close-but-no-insert and forward-only progress
-    # no longer sustain reward unless insertion depth actually increases.
-    progress_teacher_forward_reward_requires_insert_progress: bool = True
-    progress_teacher_forward_insert_progress_start_norm: float = 0.0002
-    progress_teacher_forward_insert_progress_ramp_norm: float = 0.0025
-    progress_teacher_close_noinsert_gate_enable: bool = True
-    progress_teacher_close_noinsert_gate_dist_m: float = 0.74
-    progress_teacher_close_noinsert_insert_start_norm: float = 0.035
-    progress_teacher_close_noinsert_insert_ramp_norm: float = 0.10
-    progress_teacher_close_noinsert_positive_floor: float = 0.0
-    progress_teacher_close_noinsert_commit_floor: float = 0.0
-    progress_teacher_close_noinsert_penalty_weight: float = 1.20
-
-    progress_teacher_approach_weight: float = 7.0
-    progress_teacher_away_penalty_weight: float = 18.0
-    progress_teacher_aligned_approach_progress_weight: float = 65.0
     progress_teacher_near_align_progress_weight: float = 10.0
-    progress_teacher_commit_progress_weight: float = 150.0
-    progress_teacher_commit_forward_weight: float = 0.0
-    progress_teacher_insert_weight: float = 185.0
-    progress_teacher_insert_potential_weight: float = 1.4
-    progress_teacher_hold_weight: float = 80.0
-    progress_teacher_stable_insert_weight: float = 0.55
-    progress_teacher_hold_alive_weight: float = 1.8
-    progress_teacher_hold_drop_penalty_weight: float = 4.0
-    progress_teacher_align_potential_weight: float = 0.006
-    progress_teacher_distance_penalty: float = 0.040
-    progress_teacher_action_l2: float = -0.040
-    rew_success: float = 280.0
-    rew_success_time: float = 70.0
+    progress_teacher_near_align_curriculum_enable: bool = True
+    progress_teacher_near_align_curriculum_start_step: int = 25_600
+    progress_teacher_near_align_curriculum_ramp_steps: int = 12_800
+    progress_teacher_misaligned_forward_penalty_weight: float = 1.35
 
-    progress_teacher_near_dist_m: float = 1.25
-    progress_teacher_near_ramp_m: float = 0.70
-    progress_teacher_commit_dist_m: float = 0.62
-    progress_teacher_center_gate_m: float = 0.16
-    progress_teacher_yaw_gate_deg: float = 7.0
-    progress_teacher_insert_gate_floor: float = 0.0
-    progress_teacher_commit_center_sigma_m: float = 0.14
-    progress_teacher_commit_tip_sigma_m: float = 0.13
-    progress_teacher_commit_yaw_sigma_deg: float = 7.0
+
+@configclass
+class ForkliftPalletApproachToyotaGeoEdgeProgressTeacherV311LegacyLateNearLateralHoldEnvCfg(
+    ForkliftPalletApproachToyotaGeoEdgeProgressTeacherEnvCfg
+):
+    """Keep v3.11 learning past 400 before applying a gentle low-drift hold."""
+
+    stage1_near_hard_curriculum_enable: bool = True
+    stage1_near_hard_curriculum_frac: float = 0.04
+    stage1_near_hard_curriculum_start_step: int = 32_000
+    stage1_near_hard_curriculum_ramp_steps: int = 16_000
+    stage1_near_hard_x_min_m: float = -3.28
+    stage1_near_hard_x_max_m: float = -3.00
+    stage1_near_hard_y_abs_min_m: float = 0.40
+    stage1_near_hard_y_abs_max_m: float = 0.60
+    stage1_near_hard_yaw_abs_min_deg: float = 0.0
+    stage1_near_hard_yaw_abs_max_deg: float = 14.32394487827058
+    stage1_near_hard_lateral_frac: float = 1.0
+    stage1_near_hard_positive_y_frac: float = 0.5
+    stage1_near_hard_positive_yaw_frac: float = 0.5
+    stage1_near_hard_opposite_yaw_frac: float = 0.50
+
+    progress_teacher_near_align_progress_weight: float = 4.0
+    progress_teacher_near_align_curriculum_enable: bool = True
+    progress_teacher_near_align_curriculum_start_step: int = 32_000
+    progress_teacher_near_align_curriculum_ramp_steps: int = 16_000
+    progress_teacher_misaligned_forward_penalty_weight: float = 1.25
+
+
+@configclass
+class ForkliftPalletApproachToyotaGeoEdgeProgressTeacherV311LegacyCleanQualityProbeEnvCfg(
+    ForkliftPalletApproachToyotaGeoEdgeProgressTeacherEnvCfg
+):
+    """Short warm-start probe for visually clean hard-lateral insertion.
+
+    This is not a fresh teacher retrain. It starts from the accepted v3.11
+    actor and tightens the push-free target from the old 5 cm eval scale toward
+    a 3 cm visual-clean scale.
+    """
+
+    push_free_disp_thresh_m: float = 0.030
+
+    stage1_near_hard_curriculum_enable: bool = True
+    stage1_near_hard_curriculum_frac: float = 0.24
+    stage1_near_hard_curriculum_start_step: int = 0
+    stage1_near_hard_curriculum_ramp_steps: int = 2_560
+    stage1_near_hard_x_min_m: float = -3.35
+    stage1_near_hard_x_max_m: float = -3.00
+    stage1_near_hard_y_abs_min_m: float = 0.40
+    stage1_near_hard_y_abs_max_m: float = 0.60
+    stage1_near_hard_yaw_abs_min_deg: float = 0.0
+    stage1_near_hard_yaw_abs_max_deg: float = 14.32394487827058
+    stage1_near_hard_lateral_frac: float = 1.0
+    stage1_near_hard_positive_y_frac: float = 0.5
+    stage1_near_hard_positive_yaw_frac: float = 0.5
+    stage1_near_hard_opposite_yaw_frac: float = 0.50
+
+    push_free_training_success_enable: bool = True
+    push_free_training_use_max_disp: bool = True
+    push_free_dirty_success_penalty_weight: float = 18.0
 
     progress_teacher_pushfree_curriculum_enable: bool = True
     progress_teacher_pushfree_curriculum_start_step: int = 0
-    progress_teacher_pushfree_curriculum_ramp_steps: int = 1
-    progress_teacher_push_sigma_start_m: float = 0.060
-    progress_teacher_push_sigma_m: float = 0.060
-    progress_teacher_clean_disp_start_m: float = 0.075
-    progress_teacher_clean_disp_m: float = 0.075
-    progress_teacher_success_disp_start_m: float = 0.080
-    progress_teacher_success_disp_m: float = 0.080
-    progress_teacher_push_penalty_start_weight: float = 12.0
+    progress_teacher_pushfree_curriculum_ramp_steps: int = 5_120
+    progress_teacher_push_sigma_start_m: float = 0.065
+    progress_teacher_push_sigma_m: float = 0.035
+    progress_teacher_clean_disp_start_m: float = 0.060
+    progress_teacher_clean_disp_m: float = 0.035
+    progress_teacher_success_disp_start_m: float = 0.050
+    progress_teacher_success_disp_m: float = 0.030
+    progress_teacher_push_deadband_start_m: float = 0.015
+    progress_teacher_push_deadband_m: float = 0.006
+    progress_teacher_push_penalty_start_weight: float = 5.0
     progress_teacher_push_penalty: float = 12.0
-    progress_teacher_push_deadband_start_m: float = 0.010
-    progress_teacher_push_deadband_m: float = 0.010
-    progress_teacher_dirty_insert_weight_start: float = 42.0
-    progress_teacher_dirty_insert_penalty_weight: float = 42.0
-    progress_teacher_dirty_insert_disp_start_m: float = 0.030
-    progress_teacher_dirty_insert_disp_m: float = 0.030
+    progress_teacher_dirty_insert_weight_start: float = 16.0
+    progress_teacher_dirty_insert_penalty_weight: float = 36.0
+    progress_teacher_dirty_insert_disp_start_m: float = 0.035
+    progress_teacher_dirty_insert_disp_m: float = 0.020
     progress_teacher_dirty_insert_min_norm: float = 0.12
-    progress_teacher_preinsert_termination_start_m: float = 0.080
-    progress_teacher_dirty_termination_start_m: float = 0.105
-    preinsert_push_termination_enable: bool = True
-    preinsert_push_termination_m: float = 0.080
-    preinsert_push_termination_min_steps: int = 6
-    preinsert_push_termination_penalty_weight: float = 180.0
-    dirty_push_termination_enable: bool = True
-    dirty_push_termination_m: float = 0.105
-    dirty_push_termination_min_steps: int = 6
-    dirty_push_termination_penalty_weight: float = 220.0
-    progress_teacher_dirty_insert_termination_enable: bool = True
-    progress_teacher_dirty_insert_termination_disp_m: float = 0.065
-    progress_teacher_dirty_insert_termination_min_norm: float = 0.22
-    progress_teacher_dirty_insert_termination_min_steps: int = 6
-    progress_teacher_dirty_insert_termination_penalty_weight: float = 180.0
+
+    progress_teacher_near_align_progress_weight: float = 22.0
+    progress_teacher_aligned_approach_progress_weight: float = 72.0
+    progress_teacher_commit_progress_weight: float = 210.0
+    progress_teacher_commit_forward_weight: float = 0.34
+    progress_teacher_insert_weight: float = 150.0
+    progress_teacher_hold_weight: float = 42.0
+    progress_teacher_action_l2: float = -0.014
 
     progress_teacher_misaligned_forward_penalty_enable: bool = True
-    progress_teacher_misaligned_forward_penalty_weight: float = 5.5
-    progress_teacher_misaligned_forward_near_m: float = 0.95
-    progress_teacher_misaligned_forward_center_m: float = 0.10
-    progress_teacher_misaligned_forward_tip_m: float = 0.10
+    progress_teacher_misaligned_forward_penalty_weight: float = 2.2
+    progress_teacher_misaligned_forward_near_m: float = 0.84
+    progress_teacher_misaligned_forward_center_m: float = 0.11
+    progress_teacher_misaligned_forward_tip_m: float = 0.11
     progress_teacher_misaligned_forward_yaw_deg: float = 5.5
-    progress_teacher_reverse_drive_penalty_enable: bool = True
-    progress_teacher_reverse_drive_penalty_weight: float = 0.70
-    progress_teacher_reverse_drive_penalty_min_dist_m: float = 0.10
-    progress_teacher_reverse_drive_penalty_ramp_m: float = 0.55
-    progress_teacher_far_noinsert_penalty_enable: bool = True
-    progress_teacher_far_noinsert_penalty_weight: float = 0.55
-    progress_teacher_far_noinsert_dist_m: float = 0.34
-    progress_teacher_far_noinsert_ramp_m: float = 0.18
-    progress_teacher_far_noinsert_start_step: float = 80.0
-    progress_teacher_far_noinsert_step_ramp: float = 80.0
-    progress_teacher_far_noinsert_insert_start_norm: float = 0.08
-    progress_teacher_far_noinsert_insert_ramp_norm: float = 0.12
 
-    progress_teacher_steer_sign_weight: float = 0.45
-    progress_teacher_steer_wrong_sign_penalty_weight: float = 2.50
-    progress_teacher_steer_sign_idle_penalty_weight: float = 0.08
-    progress_teacher_steer_sign_near_m: float = 1.15
-    progress_teacher_steer_sign_near_ramp_m: float = 0.75
-    progress_teacher_steer_sign_stop_insert_norm: float = 0.45
-    progress_teacher_steer_sign_reward_requires_approach: bool = True
-    progress_teacher_steer_sign_reward_drive_min: float = -0.02
-    progress_teacher_steer_sign_reward_drive_ramp: float = 0.18
-    progress_teacher_steer_sign_reward_progress_min: float = 0.0002
-    progress_teacher_steer_sign_reward_progress_ramp: float = 0.004
-    progress_teacher_steer_sign_reward_away_start: float = 0.0005
-    progress_teacher_steer_sign_reward_away_ramp: float = 0.006
-    progress_teacher_steer_sign_reward_gate_floor: float = 0.02
+    preinsert_push_termination_enable: bool = True
+    preinsert_push_termination_m: float = 0.080
+    preinsert_push_termination_min_steps: int = 8
+    preinsert_push_termination_penalty_weight: float = 120.0
+    dirty_push_termination_enable: bool = True
+    dirty_push_termination_m: float = 0.110
+    dirty_push_termination_min_steps: int = 8
+    dirty_push_termination_penalty_weight: float = 180.0
+    progress_teacher_preinsert_termination_start_m: float = 0.120
+    progress_teacher_dirty_termination_start_m: float = 0.160
+    progress_teacher_dirty_insert_termination_enable: bool = True
+    progress_teacher_dirty_insert_termination_disp_m: float = 0.055
+    progress_teacher_dirty_insert_termination_min_norm: float = 0.60
+    progress_teacher_dirty_insert_termination_min_steps: int = 8
+    progress_teacher_dirty_insert_termination_penalty_weight: float = 110.0
 
 
 @configclass
@@ -3142,83 +1722,77 @@ class ForkliftPalletApproachToyotaGeoEdgePushSafeTeacherCollectEnvCfg(
 
 
 @configclass
-class ForkliftPalletApproachToyotaGeoEdgeProgressTeacherCollectEnvCfg(
+class ForkliftPalletApproachV311LegacyAcceptedTeacherVisualFreshEnvCfg(
     ForkliftPalletApproachToyotaGeoEdgeProgressTeacherEnvCfg
 ):
-    """v3.11 progress teacher obs plus render-isolated dual RGB recording."""
+    """Fresh visual student matched to the accepted V311 legacy teacher MDP.
 
+    This is not a DirectVisual/V40 continuation.  It keeps the accepted
+    privileged teacher's reset, physics, and reward stack, but changes the
+    policy observation to Toyota dual-camera RGB plus 5D proprio.  Privileged
+    geometry is available only to the critic/reward path.
+    """
+
+    action_space: int = 2
     use_camera: bool = True
     use_dual_cameras: bool = True
-    geo_edge_record_cameras: bool = True
+    use_asymmetric_critic: bool = True
+    enable_geo_edge_obs: bool = False
+    geo_edge_record_cameras: bool = False
+    observation_space = {
+        "image_left": [3, 224, 224],
+        "image_right": [3, 224, 224],
+        "proprio": 5,
+    }
+    state_space = 15
 
-    camera_width: int = 224
-    camera_height: int = 224
+    scene: InteractiveSceneCfg = InteractiveSceneCfg(
+        num_envs=64,
+        env_spacing=20.0,
+        replicate_physics=True,
+        filter_collisions=True,
+        clone_in_fabric=False,
+    )
+
     dual_camera_width: int = 224
     dual_camera_height: int = 224
     dual_camera_hfov_deg: float = 60.0
-
-    scene: InteractiveSceneCfg = InteractiveSceneCfg(
-        num_envs=16,
-        env_spacing=20.0,
-        replicate_physics=True,
-        filter_collisions=True,
-        clone_in_fabric=False,
-    )
-    vision_room_enable: bool = True
-    rerender_on_reset: bool = False
-
-
-@configclass
-class ForkliftPalletApproachToyotaGeoEdgeProgressTeacherCollectCleanViewEnvCfg(
-    ForkliftPalletApproachToyotaGeoEdgeProgressTeacherCollectEnvCfg
-):
-    """Frozen v3.11 teacher collection task with clean-view dual RGB."""
-
-    dual_camera_hfov_deg: float = 45.0
-    dual_camera_left_pos_local: tuple[float, float, float] = (135.0, 75.0, 120.0)
-    dual_camera_right_pos_local: tuple[float, float, float] = (135.0, -75.0, 120.0)
-    dual_camera_left_rpy_local_deg: tuple[float, float, float] = (0.0, 55.0, -16.0)
-    dual_camera_right_rpy_local_deg: tuple[float, float, float] = (0.0, 55.0, 16.0)
-
-    scene: InteractiveSceneCfg = InteractiveSceneCfg(
-        num_envs=16,
-        env_spacing=20.0,
-        replicate_physics=True,
-        filter_collisions=True,
-        clone_in_fabric=False,
-    )
-    vision_room_enable: bool = True
-    rerender_on_reset: bool = False
-
-
-@configclass
-class ForkliftPalletApproachToyotaGeoEdgeProgressTeacherCollectRoom60EnvCfg(
-    ForkliftPalletApproachToyotaGeoEdgeProgressTeacherCollectEnvCfg
-):
-    """v3.11 teacher collection task for Room60 single-process RGB isolation."""
-
-    dual_camera_hfov_deg: float = 60.0
-    dual_camera_left_pos_local: tuple[float, float, float] = (175.0, 85.0, 180.0)
-    dual_camera_right_pos_local: tuple[float, float, float] = (175.0, -85.0, 180.0)
-    dual_camera_left_rpy_local_deg: tuple[float, float, float] = (0.0, 50.0, -8.0)
-    dual_camera_right_rpy_local_deg: tuple[float, float, float] = (0.0, 50.0, 8.0)
     dual_camera_near_clip_m: float = 0.1
     dual_camera_far_clip_m: float = 8.0
+    dual_camera_left_pos_local: tuple[float, float, float] = (120.0, 55.0, 150.0)
+    dual_camera_right_pos_local: tuple[float, float, float] = (120.0, -55.0, 150.0)
+    dual_camera_left_rpy_local_deg: tuple[float, float, float] = (0.0, 68.0, -8.0)
+    dual_camera_right_rpy_local_deg: tuple[float, float, float] = (0.0, 68.0, 8.0)
 
-    scene: InteractiveSceneCfg = InteractiveSceneCfg(
-        num_envs=16,
-        env_spacing=20.0,
-        replicate_physics=True,
-        filter_collisions=True,
-        clone_in_fabric=False,
-    )
     vision_room_enable: bool = True
-    vision_room_collision_enable: bool = True
-    vision_room_length_m: float = 10.0
-    vision_room_width_m: float = 8.0
-    vision_room_height_m: float = 3.0
-    vision_room_wall_thickness_m: float = 0.15
-    vision_room_center_x_m: float = -1.5
-    vision_room_center_y_m: float = 0.0
+    vision_room_ceiling_enable: bool = False
+    vision_room_floor_enable: bool = True
     vision_room_color: tuple[float, float, float] = (0.92, 0.92, 0.88)
     rerender_on_reset: bool = False
+
+
+@configclass
+class ForkliftPalletApproachV311LegacyAcceptedTeacherVisualFreshPushPenaltyW10EnvCfg(
+    ForkliftPalletApproachV311LegacyAcceptedTeacherVisualFreshEnvCfg
+):
+    """Single-factor visual reward experiment: increase only push penalty."""
+
+    progress_teacher_push_penalty: float = 10.0
+
+
+@configclass
+class ForkliftPalletApproachV311LegacyAcceptedTeacherVisualFreshNearAlignW10EnvCfg(
+    ForkliftPalletApproachV311LegacyAcceptedTeacherVisualFreshEnvCfg
+):
+    """Single-factor visual reward experiment: enable near-field align progress."""
+
+    progress_teacher_near_align_progress_weight: float = 10.0
+
+
+@configclass
+class ForkliftPalletApproachV311LegacyAcceptedTeacherVisualFreshDirtyInsertW36EnvCfg(
+    ForkliftPalletApproachV311LegacyAcceptedTeacherVisualFreshEnvCfg
+):
+    """Single-factor visual reward experiment: increase only dirty-insert penalty."""
+
+    progress_teacher_dirty_insert_penalty_weight: float = 36.0

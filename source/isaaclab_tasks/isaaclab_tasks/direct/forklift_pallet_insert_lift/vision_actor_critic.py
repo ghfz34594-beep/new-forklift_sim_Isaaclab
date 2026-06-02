@@ -19,7 +19,8 @@ class VisionActorCritic(nn.Module):
     """视觉 actor + 低维 critic。
 
     约定输入结构：
-    - obs["policy"]["image"]   : (N, 3, H, W)
+    - single camera: obs["policy"]["image"] : (N, 3, H, W)
+    - dual camera:   obs["policy"]["image_left/right"] : (N, 3, H, W)
     - obs["policy"]["proprio"] : (N, P)
     - obs["critic"]            : (N, C)
     """
@@ -43,6 +44,9 @@ class VisionActorCritic(nn.Module):
         freeze_backbone: bool = False,
         freeze_backbone_updates: int = 0,
         imagenet_backbone_init: bool = False,
+        dual_camera: bool | None = None,
+        squash_actor_mean: bool = False,
+        actor_action_scale: float | list[float] | tuple[float, ...] | None = None,
         **kwargs,
     ):
         if kwargs:
@@ -54,9 +58,14 @@ class VisionActorCritic(nn.Module):
 
         self.obs_groups = obs_groups
         self.noise_std_type = noise_std_type
+        self.num_actions = int(num_actions)
+        self.squash_actor_mean = bool(squash_actor_mean)
 
-        sample_image, sample_proprio = self._extract_policy_terms(obs)
+        sample_images, sample_proprio = self._extract_policy_terms(obs)
         sample_critic = obs["critic"]
+        self.dual_camera = bool(dual_camera) if dual_camera is not None else len(sample_images) == 2
+        action_scale = self._make_action_scale(actor_action_scale, self.num_actions)
+        self.register_buffer("actor_action_scale", action_scale.view(1, -1), persistent=False)
 
         proprio_dim = int(sample_proprio.shape[-1])
         critic_dim = int(sample_critic.shape[-1])
@@ -79,10 +88,11 @@ class VisionActorCritic(nn.Module):
             raise ValueError(f"Unknown backbone_type: {backbone_type}")
 
         with torch.no_grad():
-            image_feat_dim = int(self.image_encoder(sample_image[:1].detach().cpu()).shape[-1])
+            image_feat_dim = int(self.image_encoder(sample_images[0][:1].detach().cpu()).shape[-1])
+        fused_image_feat_dim = image_feat_dim * (2 if self.dual_camera else 1)
 
         self.image_proj = nn.Sequential(
-            nn.Linear(image_feat_dim, 256),
+            nn.Linear(fused_image_feat_dim, 256),
             resolve_nn_activation(activation),
             nn.Linear(256, 256),
             resolve_nn_activation(activation),
@@ -123,6 +133,8 @@ class VisionActorCritic(nn.Module):
         print(f"Vision image projection: {self.image_proj}")
         print(f"Vision proprio encoder: {self.proprio_encoder}")
         print(f"Actor head: {self.actor}")
+        if self.squash_actor_mean:
+            print(f"Actor mean bounded with tanh and action scale={self.actor_action_scale.flatten().tolist()}")
         print(f"Critic MLP: {self.critic}")
 
         if self.noise_std_type == "scalar":
@@ -134,6 +146,27 @@ class VisionActorCritic(nn.Module):
 
         self.distribution = None
         Normal.set_default_validate_args(False)
+
+    @staticmethod
+    def _make_action_scale(
+        actor_action_scale: float | list[float] | tuple[float, ...] | None,
+        num_actions: int,
+    ) -> torch.Tensor:
+        if actor_action_scale is None:
+            scale = torch.ones(num_actions, dtype=torch.float32)
+        elif isinstance(actor_action_scale, (float, int)):
+            scale = torch.full((num_actions,), float(actor_action_scale), dtype=torch.float32)
+        else:
+            scale = torch.tensor(list(actor_action_scale), dtype=torch.float32).flatten()
+            if scale.numel() == 1:
+                scale = scale.repeat(num_actions)
+        if int(scale.numel()) != int(num_actions):
+            raise ValueError(
+                f"actor_action_scale must be scalar or length {num_actions}, got shape={tuple(scale.shape)}"
+            )
+        if torch.any(scale <= 0.0):
+            raise ValueError(f"actor_action_scale values must be positive, got {scale.tolist()}")
+        return scale
 
     def reset(self, dones=None):
         pass
@@ -163,28 +196,50 @@ class VisionActorCritic(nn.Module):
         raise ValueError(f"Unexpected image shape={tuple(image.shape)}")
 
     def _extract_policy_terms(self, obs):
+        if "image_left" in obs.keys() and "image_right" in obs.keys() and "proprio" in obs.keys():
+            return (obs["image_left"], obs["image_right"]), obs["proprio"]
         if "image" in obs.keys() and "proprio" in obs.keys():
-            return obs["image"], obs["proprio"]
+            return (obs["image"],), obs["proprio"]
 
         policy_obs = obs["policy"]
+        if (
+            hasattr(policy_obs, "keys")
+            and "image_left" in policy_obs.keys()
+            and "image_right" in policy_obs.keys()
+            and "proprio" in policy_obs.keys()
+        ):
+            return (policy_obs["image_left"], policy_obs["image_right"]), policy_obs["proprio"]
         if hasattr(policy_obs, "keys") and "image" in policy_obs.keys() and "proprio" in policy_obs.keys():
-            return policy_obs["image"], policy_obs["proprio"]
+            return (policy_obs["image"],), policy_obs["proprio"]
 
-        raise KeyError("Cannot resolve policy image/proprio from observations")
+        raise KeyError("Cannot resolve policy image/proprio or image_left/image_right/proprio from observations")
 
     def _encode_policy_obs(self, obs):
-        image, proprio = self._extract_policy_terms(obs)
-        image = self._ensure_image_tensor(image)
-        if image.max() > 1.0:
-            image = image / 255.0
-        image = torch.clamp(image, 0.0, 1.0)
+        images, proprio = self._extract_policy_terms(obs)
+        if self.dual_camera and len(images) != 2:
+            raise ValueError("VisionActorCritic configured for dual_camera=True but observations do not contain two images")
+        if not self.dual_camera and len(images) != 1:
+            raise ValueError("VisionActorCritic configured for single camera but observations contain two images")
+        encoded_images = []
+        for image in images:
+            image = self._ensure_image_tensor(image)
+            if image.max() > 1.0:
+                image = image / 255.0
+            image = torch.clamp(image, 0.0, 1.0)
+            encoded_images.append(self.image_encoder(image))
 
         proprio = proprio.float()
         proprio = self.actor_obs_normalizer(proprio)
 
-        image_feat = self.image_proj(self.image_encoder(image))
+        image_feat = self.image_proj(torch.cat(encoded_images, dim=-1))
         proprio_feat = self.proprio_encoder(proprio)
         return torch.cat([image_feat, proprio_feat], dim=-1)
+
+    def _actor_mean(self, obs):
+        mean = self.actor(self._encode_policy_obs(obs))
+        if self.squash_actor_mean:
+            return torch.tanh(mean) * self.actor_action_scale.to(device=mean.device, dtype=mean.dtype)
+        return mean
 
     def _set_backbone_frozen(self, frozen: bool) -> None:
         freeze_module(self.image_encoder, frozen)
@@ -213,7 +268,7 @@ class VisionActorCritic(nn.Module):
             )
 
     def update_distribution(self, obs):
-        mean = self.actor(self._encode_policy_obs(obs))
+        mean = self._actor_mean(obs)
         if self.noise_std_type == "scalar":
             std = self.std.expand_as(mean)
         elif self.noise_std_type == "log":
@@ -228,7 +283,7 @@ class VisionActorCritic(nn.Module):
         return self.distribution.sample()
 
     def act_inference(self, obs):
-        return self.actor(self._encode_policy_obs(obs))
+        return self._actor_mean(obs)
 
     def evaluate(self, obs, **kwargs):
         critic_obs = self.get_critic_obs(obs)
