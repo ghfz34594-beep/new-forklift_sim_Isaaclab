@@ -616,6 +616,38 @@ gym.register(
 )
 
 gym.register(
+    id="Isaac-Forklift-PalletApproach-V311LegacyAcceptedTeacherVisualFreshActionSmoothnessW8-v0",
+    entry_point=f"{__name__}.v311_legacy_teacher_env:ForkliftPalletInsertLiftEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": (
+            f"{__name__}.v311_legacy_teacher_env_cfg:"
+            "ForkliftPalletApproachV311LegacyAcceptedTeacherVisualFreshActionSmoothnessW8EnvCfg"
+        ),
+        "rsl_rl_cfg_entry_point": (
+            f"{agents.__name__}.v311_legacy_teacher_rsl_rl_ppo_cfg:"
+            "ForkliftV311LegacyAcceptedTeacherVisualFreshActionSmoothnessW8PPORunnerCfg"
+        ),
+    },
+)
+
+gym.register(
+    id="Isaac-Forklift-PalletApproach-V311LegacyAcceptedTeacherVisualFreshSpeedPenaltyW5-v0",
+    entry_point=f"{__name__}.v311_legacy_teacher_env:ForkliftPalletInsertLiftEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": (
+            f"{__name__}.v311_legacy_teacher_env_cfg:"
+            "ForkliftPalletApproachV311LegacyAcceptedTeacherVisualFreshSpeedPenaltyW5EnvCfg"
+        ),
+        "rsl_rl_cfg_entry_point": (
+            f"{agents.__name__}.v311_legacy_teacher_rsl_rl_ppo_cfg:"
+            "ForkliftV311LegacyAcceptedTeacherVisualFreshSpeedPenaltyW5PPORunnerCfg"
+        ),
+    },
+)
+
+gym.register(
     id="Isaac-Forklift-PalletApproach-ToyotaGeoEdgeProgressTeacherV311LegacyCleanQualityProbe-v0",
     entry_point=f"{__name__}.v311_legacy_teacher_env:ForkliftPalletInsertLiftEnv",
     disable_env_checker=True,

@@ -3289,6 +3289,14 @@ class ForkliftPalletInsertLiftEnv(DirectRLEnv):
             float(getattr(self.cfg, "progress_teacher_action_l2", -0.01))
             * (self.actions[:, :2] ** 2).sum(dim=1)
         )
+        fork_speed_xy = torch.norm(self.robot.data.root_vel_w[:, :2], dim=-1)
+        speed_excess = torch.clamp(
+            fork_speed_xy - float(getattr(self.cfg, "progress_teacher_speed_penalty_thresh_mps", 0.07)),
+            min=0.0,
+        )
+        speed_penalty = -float(getattr(self.cfg, "progress_teacher_speed_penalty_weight", 0.0)) * (
+            speed_excess ** 2
+        )
         time_penalty = torch.full_like(stage_dist_front, float(getattr(self.cfg, "progress_teacher_time_penalty", -0.002)))
         distance_penalty = -float(getattr(self.cfg, "progress_teacher_distance_penalty", 0.01)) * torch.sqrt(
             stage_dist_front ** 2 + y_err ** 2
@@ -3467,6 +3475,7 @@ class ForkliftPalletInsertLiftEnv(DirectRLEnv):
             + r_hold_progress
             + r_terminal
             + action_penalty
+            + speed_penalty
             + time_penalty
             + distance_penalty
             + push_penalty
@@ -3509,6 +3518,7 @@ class ForkliftPalletInsertLiftEnv(DirectRLEnv):
         self.extras["log"]["progress_teacher/r_hold_progress"] = r_hold_progress.mean()
         self.extras["log"]["progress_teacher/r_terminal"] = r_terminal.mean()
         self.extras["log"]["progress_teacher/action_penalty"] = action_penalty.mean()
+        self.extras["log"]["progress_teacher/speed_penalty"] = speed_penalty.mean()
         self.extras["log"]["progress_teacher/push_penalty"] = push_penalty.mean()
         self.extras["log"]["progress_teacher/dirty_insert_penalty"] = dirty_insert_penalty.mean()
         self.extras["log"]["progress_teacher/dirty_insert_event_term_penalty"] = (
@@ -3544,6 +3554,8 @@ class ForkliftPalletInsertLiftEnv(DirectRLEnv):
         self.extras["log"]["progress_teacher/dirty_insert_excess"] = dirty_insert_excess.mean()
         self.extras["log"]["progress_teacher/dirty_insert_active"] = dirty_insert_active.mean()
         self.extras["log"]["progress_teacher/success_disp_xy"] = success_disp_xy.mean()
+        self.extras["log"]["diag/fork_speed_xy_mean"] = fork_speed_xy.mean()
+        self.extras["log"]["diag/fork_speed_excess_mean"] = speed_excess.mean()
         self.extras["log"]["err/dist_front_mean"] = dist_front_tip.mean()
         self.extras["log"]["err/dist_front_base_mean"] = dist_front_base.mean()
         self.extras["log"]["err/stage_dist_front_mean"] = stage_dist_front.mean()

@@ -388,6 +388,26 @@ class ForkliftV311LegacyAcceptedTeacherVisualFreshDirtyInsertW36PPORunnerCfg(
 
 
 @configclass
+class ForkliftV311LegacyAcceptedTeacherVisualFreshActionSmoothnessW8PPORunnerCfg(
+    ForkliftV311LegacyAcceptedTeacherVisualFreshPPORunnerCfg
+):
+    """Single-factor reward run: same visual PPO, stronger action L2 pressure."""
+
+    experiment_name = "v311_legacy_visual_reward_single_factor"
+    run_name = "action_smoothness_w8"
+
+
+@configclass
+class ForkliftV311LegacyAcceptedTeacherVisualFreshSpeedPenaltyW5PPORunnerCfg(
+    ForkliftV311LegacyAcceptedTeacherVisualFreshPPORunnerCfg
+):
+    """Single-factor reward run: same visual PPO, root-speed excess penalty."""
+
+    experiment_name = "v311_legacy_visual_reward_single_factor"
+    run_name = "speed_penalty_w5"
+
+
+@configclass
 class ForkliftToyotaGeoEdgePotentialTeacherPPORunnerCfg(ForkliftInsertLiftGeoEdgePPORunnerCfg):
     """Clean 2D approach teacher using model_1999-style potential shaping."""
 

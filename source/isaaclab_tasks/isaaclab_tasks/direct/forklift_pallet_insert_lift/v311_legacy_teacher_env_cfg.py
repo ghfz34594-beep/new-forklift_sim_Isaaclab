@@ -1487,6 +1487,8 @@ class ForkliftPalletApproachToyotaGeoEdgeProgressTeacherEnvCfg(ForkliftPalletIns
     progress_teacher_mouth_stall_penalty: float = 0.16
     progress_teacher_min_commit_forward_action: float = 0.22
     progress_teacher_action_l2: float = -0.012
+    progress_teacher_speed_penalty_weight: float = 0.0
+    progress_teacher_speed_penalty_thresh_mps: float = 0.07
     progress_teacher_time_penalty: float = -0.004
     progress_teacher_distance_penalty: float = 0.006
     progress_teacher_push_penalty: float = 5.0
@@ -1796,3 +1798,22 @@ class ForkliftPalletApproachV311LegacyAcceptedTeacherVisualFreshDirtyInsertW36En
     """Single-factor visual reward experiment: increase only dirty-insert penalty."""
 
     progress_teacher_dirty_insert_penalty_weight: float = 36.0
+
+
+@configclass
+class ForkliftPalletApproachV311LegacyAcceptedTeacherVisualFreshActionSmoothnessW8EnvCfg(
+    ForkliftPalletApproachV311LegacyAcceptedTeacherVisualFreshEnvCfg
+):
+    """Single-factor visual reward experiment: increase only action L2 pressure."""
+
+    progress_teacher_action_l2: float = -0.08
+
+
+@configclass
+class ForkliftPalletApproachV311LegacyAcceptedTeacherVisualFreshSpeedPenaltyW5EnvCfg(
+    ForkliftPalletApproachV311LegacyAcceptedTeacherVisualFreshEnvCfg
+):
+    """Single-factor visual reward experiment: add only root-speed excess penalty."""
+
+    progress_teacher_speed_penalty_weight: float = 5.0
+    progress_teacher_speed_penalty_thresh_mps: float = 0.07
