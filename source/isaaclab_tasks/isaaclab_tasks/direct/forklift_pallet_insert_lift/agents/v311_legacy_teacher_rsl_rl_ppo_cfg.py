@@ -19,6 +19,7 @@ class ForkliftVisionActorCriticCfg(RslRlPpoActorCriticCfg):
     freeze_backbone: bool = False
     freeze_backbone_updates: int = 0
     imagenet_backbone_init: bool = True
+    imagenet_input_normalization: bool | None = None
     backbone_type: str = "mobilenet_v3_small"
     dual_camera: bool = False
     squash_actor_mean: bool = False
@@ -405,6 +406,116 @@ class ForkliftV311LegacyAcceptedTeacherVisualFreshSpeedPenaltyW5PPORunnerCfg(
 
     experiment_name = "v311_legacy_visual_reward_single_factor"
     run_name = "speed_penalty_w5"
+
+
+@configclass
+class ForkliftV311LegacyAcceptedTeacherVisualFreshCurveRulerPreAlignW6PPORunnerCfg(
+    ForkliftV311LegacyAcceptedTeacherVisualFreshPPORunnerCfg
+):
+    """Stage 2C curve-first visual PPO with a pre-align reward ruler."""
+
+    seed = 20260601
+    experiment_name = "v311_legacy_visual_curve_guidance"
+    run_name = "curve_ruler_pre_align_w6"
+
+
+@configclass
+class ForkliftV311LegacyAcceptedTeacherVisualFreshCurveLookaheadPreAlignW18PPORunnerCfg(
+    ForkliftV311LegacyAcceptedTeacherVisualFreshPPORunnerCfg
+):
+    """Stage 2C-v2 curve-first visual PPO with lookahead pre-align guidance."""
+
+    seed = 20260601
+    experiment_name = "v311_legacy_visual_curve_guidance"
+    run_name = "curve_lookahead_pre_align_w18"
+
+
+@configclass
+class ForkliftV311LegacyAcceptedTeacherVisualFreshCurveCorridorPreAlignW18PPORunnerCfg(
+    ForkliftV311LegacyAcceptedTeacherVisualFreshPPORunnerCfg
+):
+    """Stage 2C-v3 curve-first visual PPO with a pre-align corridor."""
+
+    seed = 20260601
+    experiment_name = "v311_legacy_visual_curve_guidance"
+    run_name = "curve_corridor_pre_align_w18"
+
+
+@configclass
+class ForkliftV311LegacyAcceptedTeacherVisualFreshCurvePhaseGatePreAlignW18PPORunnerCfg(
+    ForkliftV311LegacyAcceptedTeacherVisualFreshPPORunnerCfg
+):
+    """Stage 2C-v4 curve-first visual PPO with pre-align phase gating."""
+
+    seed = 20260601
+    experiment_name = "v311_legacy_visual_curve_guidance"
+    run_name = "curve_phase_gate_pre_align_w18"
+
+
+@configclass
+class ForkliftV311LegacyAcceptedTeacherVisualFreshCurvePhaseGatePreAlignW18R1Floor0PPORunnerCfg(
+    ForkliftV311LegacyAcceptedTeacherVisualFreshPPORunnerCfg
+):
+    """Stage 2C-v4 R1 control: fixed-arc lookahead with original floor=0 gate."""
+
+    seed = 20260601
+    experiment_name = "v311_legacy_visual_curve_guidance"
+    run_name = "curve_phase_gate_pre_align_w18_r1_floor0"
+
+
+@configclass
+class ForkliftV311LegacyAcceptedTeacherVisualFreshCurvePhaseGatePreAlignW18R1SoftPPORunnerCfg(
+    ForkliftV311LegacyAcceptedTeacherVisualFreshPPORunnerCfg
+):
+    """Stage 2C-v4 R1/R2 soft gate: fixed-arc lookahead with insertion gradient floor."""
+
+    seed = 20260601
+    experiment_name = "v311_legacy_visual_curve_guidance"
+    run_name = "curve_phase_gate_pre_align_w18_r1_soft"
+
+
+@configclass
+class ForkliftV311LegacyAcceptedTeacherVisualFreshCurvePhaseLatchPreAlignV5PPORunnerCfg(
+    ForkliftV311LegacyAcceptedTeacherVisualFreshPPORunnerCfg
+):
+    """Stage 2C-v5 visual PPO with an explicit pre-align latch."""
+
+    seed = 20260601
+    experiment_name = "v311_legacy_visual_curve_guidance"
+    run_name = "curve_phase_latch_pre_align_v5"
+
+
+@configclass
+class ForkliftV311LegacyAcceptedTeacherVisualFreshCurvePhaseLatchPreAlignV5BDualGatePPORunnerCfg(
+    ForkliftV311LegacyAcceptedTeacherVisualFreshPPORunnerCfg
+):
+    """Stage 2C-v5b visual PPO with latch plus current-quality insertion gate."""
+
+    seed = 20260601
+    experiment_name = "v311_legacy_visual_curve_guidance"
+    run_name = "curve_phase_latch_pre_align_v5b_dual_gate"
+
+
+@configclass
+class ForkliftV311LegacyAcceptedTeacherVisualFreshCurvePhaseLatchPreAlignV6ReleaseGatePPORunnerCfg(
+    ForkliftV311LegacyAcceptedTeacherVisualFreshPPORunnerCfg
+):
+    """Stage 2C-v6 visual PPO with a releasable pre-align latch."""
+
+    seed = 20260601
+    experiment_name = "v311_legacy_visual_curve_guidance"
+    run_name = "curve_phase_latch_pre_align_v6_release_gate"
+
+
+@configclass
+class ForkliftV311LegacyAcceptedTeacherVisualFreshActionGuidanceW01PPORunnerCfg(
+    ForkliftV311LegacyAcceptedTeacherVisualFreshPPORunnerCfg
+):
+    """Stage 3 weak teacher-action guidance run."""
+
+    seed = 20260601
+    experiment_name = "v311_legacy_visual_teacher_guidance"
+    run_name = "action_guidance_w01"
 
 
 @configclass

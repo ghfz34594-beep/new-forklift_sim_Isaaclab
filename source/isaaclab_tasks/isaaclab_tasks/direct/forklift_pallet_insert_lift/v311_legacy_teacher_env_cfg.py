@@ -572,8 +572,10 @@ class ForkliftPalletInsertLiftEnvCfg(DirectRLEnvCfg):
     traj_rs_forward_preferred_terminal_reverse_penalty: float = 2.0
     # Exp8.3 第一轮主矩阵：
     # - front: 轨迹终点停在托盘前沿中心（B0′ 基线）
+    # - pre_align: 轨迹终点停在托盘前对齐位姿，最终插入交给 near-field reward
     # - success_center: 轨迹 terminal geometry package 平移到 success 等效 fork_center 深度（G1）
     exp83_traj_goal_mode: str = "front"
+    exp83_traj_pre_align_fork_center_backoff_m: float = 0.60
     # Exp9.0: 主引导奖励、arrival 奖励与 out_of_bounds 默认统一到 success 几何，
     # 避免“平时追一个点，最终 success 看另一个点”的目标错位。
     # - front_center: 保留 legacy target_center
@@ -1534,6 +1536,59 @@ class ForkliftPalletApproachToyotaGeoEdgeProgressTeacherEnvCfg(ForkliftPalletIns
     progress_teacher_commit_yaw_sigma_deg: float = 10.5
     progress_teacher_aligned_approach_progress_weight: float = 60.0
     progress_teacher_near_align_progress_weight: float = 0.0
+    progress_teacher_curve_guidance_enable: bool = False
+    progress_teacher_curve_guidance_weight: float = 0.0
+    progress_teacher_curve_distance_sigma_m: float = 0.50
+    progress_teacher_curve_yaw_sigma_deg: float = 20.0
+    progress_teacher_curve_progress_weight: float = 1.5
+    progress_teacher_curve_near_gate_m: float = 3.2
+    progress_teacher_curve_near_gate_ramp_m: float = 1.0
+    progress_teacher_curve_lookahead_enable: bool = False
+    progress_teacher_curve_lookahead_steps: int = 5
+    progress_teacher_curve_lookahead_arc_m: float = 0.0
+    progress_teacher_curve_lookahead_weight: float = 0.0
+    progress_teacher_curve_lookahead_distance_sigma_m: float = 0.35
+    progress_teacher_curve_lookahead_yaw_sigma_deg: float = 16.0
+    progress_teacher_curve_corridor_enable: bool = False
+    progress_teacher_curve_corridor_weight: float = 0.0
+    progress_teacher_curve_corridor_center_sigma_m: float = 0.26
+    progress_teacher_curve_corridor_tip_sigma_m: float = 0.24
+    progress_teacher_curve_corridor_yaw_sigma_deg: float = 10.0
+    progress_teacher_curve_corridor_near_gate_m: float = 1.05
+    progress_teacher_curve_corridor_near_gate_ramp_m: float = 0.65
+    progress_teacher_curve_corridor_gate_lookahead: bool = False
+    progress_teacher_curve_corridor_lookahead_floor: float = 0.25
+    progress_teacher_curve_phase_gate_enable: bool = False
+    progress_teacher_curve_phase_gate_floor: float = 0.0
+    progress_teacher_curve_phase_gate_center_sigma_m: float = 0.16
+    progress_teacher_curve_phase_gate_tip_sigma_m: float = 0.16
+    progress_teacher_curve_phase_gate_yaw_sigma_deg: float = 6.0
+    progress_teacher_pre_align_latch_enable: bool = False
+    progress_teacher_pre_align_latch_dist_front_m: float = 0.45
+    progress_teacher_pre_align_latch_center_m: float = 0.20
+    progress_teacher_pre_align_latch_tip_m: float = 0.22
+    progress_teacher_pre_align_latch_yaw_deg: float = 8.0
+    progress_teacher_pre_align_latch_axis_m: float = 0.0
+    progress_teacher_pre_align_latch_max_insert_norm: float = 0.12
+    progress_teacher_pre_align_latch_gate_floor: float = 0.0
+    progress_teacher_pre_align_latch_reward_weight: float = 0.0
+    progress_teacher_pre_align_latch_curve_only_before_ready: bool = False
+    progress_teacher_pre_align_latch_require_current_quality: bool = False
+    progress_teacher_pre_align_latch_current_floor: float = 0.0
+    progress_teacher_pre_align_latch_current_center_sigma_m: float = 0.22
+    progress_teacher_pre_align_latch_current_tip_sigma_m: float = 0.22
+    progress_teacher_pre_align_latch_current_yaw_sigma_deg: float = 8.0
+    progress_teacher_pre_align_latch_release_enable: bool = False
+    progress_teacher_pre_align_latch_release_dist_front_m: float = 0.60
+    progress_teacher_pre_align_latch_release_center_m: float = 0.26
+    progress_teacher_pre_align_latch_release_tip_m: float = 0.28
+    progress_teacher_pre_align_latch_release_yaw_deg: float = 10.0
+    progress_teacher_pre_align_latch_release_axis_m: float = 0.30
+    progress_teacher_pre_align_latch_release_max_insert_norm: float = 0.14
+    progress_teacher_action_guidance_enable: bool = False
+    progress_teacher_action_guidance_weight: float = 0.0
+    progress_teacher_action_guidance_clip: float = 1.0
+    progress_teacher_action_guidance_checkpoint: str = ""
     progress_teacher_misaligned_forward_penalty_enable: bool = True
     progress_teacher_misaligned_forward_penalty_weight: float = 1.2
     progress_teacher_misaligned_forward_near_m: float = 0.62
@@ -1543,6 +1598,43 @@ class ForkliftPalletApproachToyotaGeoEdgeProgressTeacherEnvCfg(ForkliftPalletIns
 
     toyota_action_noise_std: float = 0.0
     toyota_velocity_obs_noise_std: float = 0.0
+
+
+@configclass
+class ForkliftPalletApproachToyotaGeoEdgeProgressTeacherV311LegacyAcceptedVisualCollectEnvCfg(
+    ForkliftPalletApproachToyotaGeoEdgeProgressTeacherEnvCfg
+):
+    """Accepted V311 teacher collection task with fresh-visual dual RGB."""
+
+    use_camera: bool = True
+    use_dual_cameras: bool = True
+    geo_edge_record_cameras: bool = True
+
+    camera_width: int = 224
+    camera_height: int = 224
+    dual_camera_width: int = 224
+    dual_camera_height: int = 224
+    dual_camera_hfov_deg: float = 60.0
+    dual_camera_near_clip_m: float = 0.1
+    dual_camera_far_clip_m: float = 8.0
+    dual_camera_left_pos_local: tuple[float, float, float] = (120.0, 55.0, 150.0)
+    dual_camera_right_pos_local: tuple[float, float, float] = (120.0, -55.0, 150.0)
+    dual_camera_left_rpy_local_deg: tuple[float, float, float] = (0.0, 68.0, -8.0)
+    dual_camera_right_rpy_local_deg: tuple[float, float, float] = (0.0, 68.0, 8.0)
+
+    scene: InteractiveSceneCfg = InteractiveSceneCfg(
+        num_envs=64,
+        env_spacing=20.0,
+        replicate_physics=True,
+        filter_collisions=True,
+        clone_in_fabric=False,
+    )
+
+    vision_room_enable: bool = True
+    vision_room_ceiling_enable: bool = False
+    vision_room_floor_enable: bool = True
+    vision_room_color: tuple[float, float, float] = (0.92, 0.92, 0.88)
+    rerender_on_reset: bool = False
 
 
 @configclass
@@ -1817,3 +1909,237 @@ class ForkliftPalletApproachV311LegacyAcceptedTeacherVisualFreshSpeedPenaltyW5En
 
     progress_teacher_speed_penalty_weight: float = 5.0
     progress_teacher_speed_penalty_thresh_mps: float = 0.07
+
+
+@configclass
+class ForkliftPalletApproachV311LegacyAcceptedTeacherVisualFreshCurveRulerPreAlignW6EnvCfg(
+    ForkliftPalletApproachV311LegacyAcceptedTeacherVisualFreshEnvCfg
+):
+    """Stage 2C curve-first visual run: episode-fixed pre-align reward ruler."""
+
+    use_reference_trajectory: bool = True
+    traj_model: str = "root_path_first"
+    traj_pre_dist_m: float = 0.90
+    traj_vehicle_curve_min_span_m: float = 0.35
+    traj_vehicle_final_straight_min_m: float = 0.10
+    traj_num_samples: int = 31
+    exp83_traj_goal_mode: str = "pre_align"
+    exp83_traj_pre_align_fork_center_backoff_m: float = 0.60
+    exp83_target_center_family_mode: str = "success_center"
+
+    progress_teacher_curve_guidance_enable: bool = True
+    progress_teacher_curve_guidance_weight: float = 6.0
+    progress_teacher_curve_distance_sigma_m: float = 0.50
+    progress_teacher_curve_yaw_sigma_deg: float = 20.0
+    progress_teacher_curve_progress_weight: float = 1.5
+    progress_teacher_curve_near_gate_m: float = 3.2
+    progress_teacher_curve_near_gate_ramp_m: float = 1.0
+
+
+@configclass
+class ForkliftPalletApproachV311LegacyAcceptedTeacherVisualFreshCurveLookaheadPreAlignW18EnvCfg(
+    ForkliftPalletApproachV311LegacyAcceptedTeacherVisualFreshEnvCfg
+):
+    """Stage 2C-v2 curve-first visual run: lookahead progress on the pre-align guide."""
+
+    use_reference_trajectory: bool = True
+    traj_model: str = "root_path_first"
+    traj_pre_dist_m: float = 0.90
+    traj_vehicle_curve_min_span_m: float = 0.35
+    traj_vehicle_final_straight_min_m: float = 0.10
+    traj_num_samples: int = 31
+    exp83_traj_goal_mode: str = "pre_align"
+    exp83_traj_pre_align_fork_center_backoff_m: float = 0.60
+    exp83_target_center_family_mode: str = "success_center"
+
+    progress_teacher_curve_guidance_enable: bool = True
+    progress_teacher_curve_guidance_weight: float = 2.0
+    progress_teacher_curve_distance_sigma_m: float = 0.45
+    progress_teacher_curve_yaw_sigma_deg: float = 18.0
+    progress_teacher_curve_progress_weight: float = 1.0
+    progress_teacher_curve_near_gate_m: float = 3.2
+    progress_teacher_curve_near_gate_ramp_m: float = 1.0
+    progress_teacher_curve_lookahead_enable: bool = True
+    progress_teacher_curve_lookahead_steps: int = 5
+    progress_teacher_curve_lookahead_weight: float = 18.0
+    progress_teacher_curve_lookahead_distance_sigma_m: float = 0.35
+    progress_teacher_curve_lookahead_yaw_sigma_deg: float = 16.0
+
+
+@configclass
+class ForkliftPalletApproachV311LegacyAcceptedTeacherVisualFreshCurveCorridorPreAlignW18EnvCfg(
+    ForkliftPalletApproachV311LegacyAcceptedTeacherVisualFreshEnvCfg
+):
+    """Stage 2C-v3 curve-first visual run: lookahead must serve the pre-align corridor."""
+
+    use_reference_trajectory: bool = True
+    traj_model: str = "root_path_first"
+    traj_pre_dist_m: float = 0.90
+    traj_vehicle_curve_min_span_m: float = 0.35
+    traj_vehicle_final_straight_min_m: float = 0.10
+    traj_num_samples: int = 31
+    exp83_traj_goal_mode: str = "pre_align"
+    exp83_traj_pre_align_fork_center_backoff_m: float = 0.60
+    exp83_target_center_family_mode: str = "success_center"
+
+    progress_teacher_curve_guidance_enable: bool = True
+    progress_teacher_curve_guidance_weight: float = 2.0
+    progress_teacher_curve_distance_sigma_m: float = 0.45
+    progress_teacher_curve_yaw_sigma_deg: float = 18.0
+    progress_teacher_curve_progress_weight: float = 1.0
+    progress_teacher_curve_near_gate_m: float = 3.2
+    progress_teacher_curve_near_gate_ramp_m: float = 1.0
+    progress_teacher_curve_lookahead_enable: bool = True
+    progress_teacher_curve_lookahead_steps: int = 5
+    progress_teacher_curve_lookahead_weight: float = 14.0
+    progress_teacher_curve_lookahead_distance_sigma_m: float = 0.35
+    progress_teacher_curve_lookahead_yaw_sigma_deg: float = 16.0
+    progress_teacher_curve_corridor_enable: bool = True
+    progress_teacher_curve_corridor_weight: float = 32.0
+    progress_teacher_curve_corridor_center_sigma_m: float = 0.26
+    progress_teacher_curve_corridor_tip_sigma_m: float = 0.24
+    progress_teacher_curve_corridor_yaw_sigma_deg: float = 10.0
+    progress_teacher_curve_corridor_near_gate_m: float = 1.10
+    progress_teacher_curve_corridor_near_gate_ramp_m: float = 0.75
+    progress_teacher_curve_corridor_gate_lookahead: bool = True
+    progress_teacher_curve_corridor_lookahead_floor: float = 0.25
+    progress_teacher_misaligned_forward_penalty_weight: float = 1.8
+    progress_teacher_misaligned_forward_near_m: float = 0.90
+    progress_teacher_misaligned_forward_center_m: float = 0.12
+    progress_teacher_misaligned_forward_tip_m: float = 0.12
+    progress_teacher_misaligned_forward_yaw_deg: float = 6.0
+
+
+@configclass
+class ForkliftPalletApproachV311LegacyAcceptedTeacherVisualFreshCurvePhaseGatePreAlignW18EnvCfg(
+    ForkliftPalletApproachV311LegacyAcceptedTeacherVisualFreshCurveCorridorPreAlignW18EnvCfg
+):
+    """Stage 2C-v4 curve-first visual run: pre-align gate before short insertion."""
+
+    progress_teacher_curve_lookahead_weight: float = 6.0
+    progress_teacher_curve_corridor_weight: float = 56.0
+    progress_teacher_curve_corridor_center_sigma_m: float = 0.22
+    progress_teacher_curve_corridor_tip_sigma_m: float = 0.20
+    progress_teacher_curve_corridor_yaw_sigma_deg: float = 8.0
+    progress_teacher_curve_corridor_lookahead_floor: float = 0.05
+    progress_teacher_curve_phase_gate_enable: bool = True
+    progress_teacher_curve_phase_gate_floor: float = 0.0
+    progress_teacher_curve_phase_gate_center_sigma_m: float = 0.16
+    progress_teacher_curve_phase_gate_tip_sigma_m: float = 0.16
+    progress_teacher_curve_phase_gate_yaw_sigma_deg: float = 6.0
+    progress_teacher_aligned_approach_progress_weight: float = 80.0
+    progress_teacher_near_align_progress_weight: float = 24.0
+    progress_teacher_insert_weight: float = 130.0
+    progress_teacher_insert_potential_weight: float = 1.2
+    progress_teacher_commit_progress_weight: float = 180.0
+    progress_teacher_commit_forward_weight: float = 0.20
+    progress_teacher_mouth_stall_penalty: float = 0.0
+    progress_teacher_misaligned_forward_penalty_weight: float = 2.6
+    progress_teacher_misaligned_forward_near_m: float = 1.05
+    progress_teacher_misaligned_forward_center_m: float = 0.10
+    progress_teacher_misaligned_forward_tip_m: float = 0.10
+    progress_teacher_misaligned_forward_yaw_deg: float = 5.0
+
+
+@configclass
+class ForkliftPalletApproachV311LegacyAcceptedTeacherVisualFreshCurvePhaseGatePreAlignW18R1Floor0EnvCfg(
+    ForkliftPalletApproachV311LegacyAcceptedTeacherVisualFreshCurvePhaseGatePreAlignW18EnvCfg
+):
+    """Stage 2C-v4 R1 control: fixed-arc lookahead with original floor=0 gate."""
+
+    progress_teacher_curve_lookahead_arc_m: float = 0.50
+    progress_teacher_curve_phase_gate_floor: float = 0.0
+
+
+@configclass
+class ForkliftPalletApproachV311LegacyAcceptedTeacherVisualFreshCurvePhaseGatePreAlignW18R1SoftEnvCfg(
+    ForkliftPalletApproachV311LegacyAcceptedTeacherVisualFreshCurvePhaseGatePreAlignW18EnvCfg
+):
+    """Stage 2C-v4 R1/R2 soft gate: fixed-arc lookahead with an insertion-gradient floor."""
+
+    progress_teacher_curve_lookahead_arc_m: float = 0.50
+    progress_teacher_curve_phase_gate_floor: float = 0.15
+    progress_teacher_curve_phase_gate_center_sigma_m: float = 0.25
+    progress_teacher_curve_phase_gate_tip_sigma_m: float = 0.25
+    progress_teacher_curve_phase_gate_yaw_sigma_deg: float = 8.0
+
+
+@configclass
+class ForkliftPalletApproachV311LegacyAcceptedTeacherVisualFreshCurvePhaseLatchPreAlignV5EnvCfg(
+    ForkliftPalletApproachV311LegacyAcceptedTeacherVisualFreshCurvePhaseGatePreAlignW18R1SoftEnvCfg
+):
+    """Stage 2C-v5: explicitly latch the pre-align phase before insertion rewards."""
+
+    progress_teacher_pre_align_latch_enable: bool = True
+    progress_teacher_pre_align_latch_dist_front_m: float = 0.58
+    progress_teacher_pre_align_latch_center_m: float = 0.22
+    progress_teacher_pre_align_latch_tip_m: float = 0.24
+    progress_teacher_pre_align_latch_yaw_deg: float = 8.0
+    progress_teacher_pre_align_latch_axis_m: float = 0.25
+    progress_teacher_pre_align_latch_max_insert_norm: float = 0.08
+    progress_teacher_pre_align_latch_gate_floor: float = 0.0
+    progress_teacher_pre_align_latch_reward_weight: float = 8.0
+    progress_teacher_pre_align_latch_curve_only_before_ready: bool = True
+    progress_teacher_curve_corridor_weight: float = 72.0
+    progress_teacher_curve_corridor_center_sigma_m: float = 0.26
+    progress_teacher_curve_corridor_tip_sigma_m: float = 0.26
+    progress_teacher_curve_corridor_yaw_sigma_deg: float = 9.0
+    progress_teacher_curve_lookahead_weight: float = 8.0
+    progress_teacher_aligned_approach_progress_weight: float = 100.0
+    progress_teacher_near_align_progress_weight: float = 36.0
+    progress_teacher_insert_weight: float = 150.0
+    progress_teacher_insert_potential_weight: float = 1.0
+    progress_teacher_commit_progress_weight: float = 200.0
+    progress_teacher_misaligned_forward_penalty_weight: float = 3.0
+    progress_teacher_misaligned_forward_near_m: float = 1.10
+
+
+@configclass
+class ForkliftPalletApproachV311LegacyAcceptedTeacherVisualFreshCurvePhaseLatchPreAlignV5BDualGateEnvCfg(
+    ForkliftPalletApproachV311LegacyAcceptedTeacherVisualFreshCurvePhaseLatchPreAlignV5EnvCfg
+):
+    """Stage 2C-v5b: ever-ready latch plus current corridor quality before insertion."""
+
+    progress_teacher_pre_align_latch_require_current_quality: bool = True
+    progress_teacher_pre_align_latch_current_floor: float = 0.05
+    progress_teacher_pre_align_latch_current_center_sigma_m: float = 0.20
+    progress_teacher_pre_align_latch_current_tip_sigma_m: float = 0.20
+    progress_teacher_pre_align_latch_current_yaw_sigma_deg: float = 7.0
+    progress_teacher_pre_align_latch_axis_m: float = 0.22
+    progress_teacher_pre_align_latch_center_m: float = 0.20
+    progress_teacher_pre_align_latch_tip_m: float = 0.22
+    progress_teacher_pre_align_latch_yaw_deg: float = 7.0
+
+
+@configclass
+class ForkliftPalletApproachV311LegacyAcceptedTeacherVisualFreshCurvePhaseLatchPreAlignV6ReleaseGateEnvCfg(
+    ForkliftPalletApproachV311LegacyAcceptedTeacherVisualFreshCurvePhaseLatchPreAlignV5BDualGateEnvCfg
+):
+    """Stage 2C-v6: latch can exit when current pre-align quality falls out of the release window."""
+
+    progress_teacher_pre_align_latch_release_enable: bool = True
+    progress_teacher_pre_align_latch_release_dist_front_m: float = 0.62
+    progress_teacher_pre_align_latch_release_center_m: float = 0.24
+    progress_teacher_pre_align_latch_release_tip_m: float = 0.26
+    progress_teacher_pre_align_latch_release_yaw_deg: float = 8.5
+    progress_teacher_pre_align_latch_release_axis_m: float = 0.28
+    progress_teacher_pre_align_latch_release_max_insert_norm: float = 0.10
+    progress_teacher_pre_align_latch_curve_only_before_ready: bool = True
+    progress_teacher_pre_align_latch_reward_weight: float = 6.0
+
+
+@configclass
+class ForkliftPalletApproachV311LegacyAcceptedTeacherVisualFreshActionGuidanceW01EnvCfg(
+    ForkliftPalletApproachV311LegacyAcceptedTeacherVisualFreshEnvCfg
+):
+    """Stage 3 weak teacher-action guidance for the visual actor."""
+
+    progress_teacher_action_guidance_enable: bool = True
+    progress_teacher_action_guidance_weight: float = 0.1
+    progress_teacher_action_guidance_clip: float = 1.0
+    progress_teacher_action_guidance_checkpoint: str = (
+        "/data/jianshi/projects/forklift_sim/IsaacLab/logs/rsl_rl/"
+        "forklift_toyota_geoedge_progress_teacher_v311_legacy_exact_freeze_actor450_v13/"
+        "2026-06-01_00-44-50_v311_legacy_v9c_model450_freeze_to1999_20260601_004446_seed42_1024env_to2000/"
+        "model_1999.pt"
+    )

@@ -40,6 +40,7 @@ from isaaclab.sim.spawners.from_files import spawn_ground_plane
 from isaaclab.utils.math import quat_apply, quat_apply_inverse, sample_uniform
 
 from .v311_legacy_teacher_env_cfg import ForkliftPalletInsertLiftEnvCfg
+from .clamped_actor_critic import ClampedActorCritic
 from .hold_logic import HoldLogicConfig, compute_hold_logic
 
 
@@ -491,6 +492,7 @@ class ForkliftPalletInsertLiftEnv(DirectRLEnv):
 
         self.robot: Articulation = self.scene.articulations["robot"]
         self.pallet: RigidObject = self.scene.rigid_objects["pallet"]
+        self._progress_teacher_action_guidance_policy = None
 
         # joint indices：将关节名字映射为索引，便于后续批量设置目标
         self._front_wheel_ids, _ = self.robot.find_joints(["left_front_wheel_joint", "right_front_wheel_joint"], preserve_order=True)
@@ -511,6 +513,7 @@ class ForkliftPalletInsertLiftEnv(DirectRLEnv):
         # 无论 action_space 是 2 还是 3，内部统一使用 3 维动作缓存
         self.actions = torch.zeros((self.num_envs, 3), device=self.device)
         self.previous_actions = torch.zeros((self.num_envs, 3), device=self.device)
+        self._progress_teacher_action_guidance_target = torch.zeros((self.num_envs, 2), device=self.device)
         self._last_insert_depth = torch.zeros((self.num_envs,), device=self.device)
         self._fork_tip_z0 = torch.zeros((self.num_envs,), device=self.device)
         # S1.0O-C2: 使用 float 以支持衰减（原 S1.0N 为 int32）
@@ -520,6 +523,9 @@ class ForkliftPalletInsertLiftEnv(DirectRLEnv):
         self._preinsert_push_termination = torch.zeros((self.num_envs,), dtype=torch.bool, device=self.device)
         self._dirty_push_termination = torch.zeros((self.num_envs,), dtype=torch.bool, device=self.device)
         self._progress_teacher_dirty_insert_termination = torch.zeros(
+            (self.num_envs,), dtype=torch.bool, device=self.device
+        )
+        self._progress_teacher_pre_align_latched = torch.zeros(
             (self.num_envs,), dtype=torch.bool, device=self.device
         )
         self._lift_pos_target = torch.zeros((self.num_envs,), device=self.device)
@@ -546,7 +552,11 @@ class ForkliftPalletInsertLiftEnv(DirectRLEnv):
         self._traj_pts = torch.zeros((self.num_envs, self.cfg.traj_num_samples, 2), device=self.device)
         self._traj_tangents = torch.zeros((self.num_envs, self.cfg.traj_num_samples, 2), device=self.device)
         self._traj_s_norm = torch.zeros((self.num_envs, self.cfg.traj_num_samples), device=self.device)
+        self._traj_length_m = torch.zeros((self.num_envs,), device=self.device)
         self._prev_phi_traj = torch.zeros((self.num_envs,), device=self.device)
+        self._prev_progress_curve_score = torch.zeros((self.num_envs,), device=self.device)
+        self._prev_progress_curve_lookahead_score = torch.zeros((self.num_envs,), device=self.device)
+        self._prev_progress_curve_corridor_score = torch.zeros((self.num_envs,), device=self.device)
         # _reset_idx 中引用的遗留缓存（必须初始化以防 AttributeError）
         self._prev_phi_align = torch.zeros((self.num_envs,), device=self.device)
         self._prev_phi_lift_progress = torch.zeros((self.num_envs,), device=self.device)
@@ -617,7 +627,11 @@ class ForkliftPalletInsertLiftEnv(DirectRLEnv):
         self._traj_pts = torch.zeros((self.num_envs, self.cfg.traj_num_samples, 2), device=self.device)
         self._traj_tangents = torch.zeros((self.num_envs, self.cfg.traj_num_samples, 2), device=self.device)
         self._traj_s_norm = torch.zeros((self.num_envs, self.cfg.traj_num_samples), device=self.device)
+        self._traj_length_m = torch.zeros((self.num_envs,), device=self.device)
         self._prev_phi_traj = torch.zeros((self.num_envs,), device=self.device)
+        self._prev_progress_curve_score = torch.zeros((self.num_envs,), device=self.device)
+        self._prev_progress_curve_lookahead_score = torch.zeros((self.num_envs,), device=self.device)
+        self._prev_progress_curve_corridor_score = torch.zeros((self.num_envs,), device=self.device)
         # Exp8.3：几何常量仅记录一次（与 summary 中 geom/* 一致）
         self._geom_constants_logged = False
         # Exp8.3 runtime U0：仅用于 sanity run 的一次性诊断日志开关。
@@ -628,6 +642,9 @@ class ForkliftPalletInsertLiftEnv(DirectRLEnv):
         # S1.0z: Episode 级别成功率统计
         self._ep_success_count = 0
         self._ep_total_count = 0
+        self._progress_teacher_ep_success_rate_ema = torch.tensor(0.0, device=self.device)
+        self._progress_teacher_ep_success_count = torch.tensor(0.0, device=self.device)
+        self._progress_teacher_ep_done_count = torch.tensor(0.0, device=self.device)
         
         # 实验 0：push-free 成功率统计
         self._ep_push_free_success_count = 0
@@ -670,7 +687,7 @@ class ForkliftPalletInsertLiftEnv(DirectRLEnv):
 
         # Phase 1A v2: 几何边缘观测预计算（相机内外参 + 端点局部坐标），
         # 必须在 self.device / self.num_envs 可用之后调用。
-        if self._geo_edge_enabled:
+        if self._geo_edge_enabled or bool(getattr(self.cfg, "progress_teacher_action_guidance_enable", False)):
             self._init_geometry_edge_obs()
 
         # 注：_fix_lift_joint_drive() 已移到 _setup_scene() 中 clone_environments() 之前调用，
@@ -1153,6 +1170,11 @@ class ForkliftPalletInsertLiftEnv(DirectRLEnv):
     # Actions
     # ---------------------------
     def _pre_physics_step(self, actions: torch.Tensor) -> None:
+        if bool(getattr(self.cfg, "progress_teacher_action_guidance_enable", False)):
+            self._progress_teacher_action_guidance_target[:] = (
+                self._get_progress_teacher_action_guidance_target()
+            )
+
         # store previous actions for ra penalty
         self.previous_actions[:] = self.actions[:]
         
@@ -1489,6 +1511,8 @@ class ForkliftPalletInsertLiftEnv(DirectRLEnv):
         mode = self.cfg.exp83_traj_goal_mode
         if mode == "front":
             return s_front
+        if mode == "pre_align":
+            return s_front - float(getattr(self.cfg, "exp83_traj_pre_align_fork_center_backoff_m", 0.60))
         if mode == "success_center":
             return self._exp83_success_center_s()
         raise ValueError(f"Unsupported exp83_traj_goal_mode: {mode}")
@@ -1521,6 +1545,7 @@ class ForkliftPalletInsertLiftEnv(DirectRLEnv):
             self._traj_pts[env_ids] = 0.0
             self._traj_tangents[env_ids] = 0.0
             self._traj_s_norm[env_ids] = 0.0
+            self._traj_length_m[env_ids] = 0.0
             return
 
         # 1. 获取起点位姿
@@ -1559,6 +1584,7 @@ class ForkliftPalletInsertLiftEnv(DirectRLEnv):
         pts_out = torch.zeros((len(env_ids), num_samples, 2), device=self.device)
         tangents_out = torch.zeros((len(env_ids), num_samples, 2), device=self.device)
         s_norm_out = torch.zeros((len(env_ids), num_samples), device=self.device)
+        traj_length_out = torch.zeros((len(env_ids),), device=self.device)
         fallback_count = 0
 
         for local_idx in range(len(env_ids)):
@@ -1646,21 +1672,23 @@ class ForkliftPalletInsertLiftEnv(DirectRLEnv):
                 raise ValueError(f"Unsupported traj_model: {traj_model}")
 
             pts_np = root_pts_np + root_to_fc * root_tangents_np
-            diffs_np = root_pts_np[1:, :] - root_pts_np[:-1, :]
+            diffs_np = pts_np[1:, :] - pts_np[:-1, :]
             dists_np = np.linalg.norm(diffs_np, axis=1)
             s_cum_np = np.concatenate(
                 [np.zeros((1,), dtype=np.float64), np.cumsum(dists_np, dtype=np.float64)],
                 axis=0,
             )
-            s_total = float(s_cum_np[-1]) + 1e-6
+            s_total = max(float(s_cum_np[-1]), 1e-6)
 
             pts_out[local_idx] = torch.from_numpy(pts_np).to(device=self.device, dtype=torch.float32)
             tangents_out[local_idx] = torch.from_numpy(root_tangents_np).to(device=self.device, dtype=torch.float32)
             s_norm_out[local_idx] = torch.from_numpy(s_cum_np / s_total).to(device=self.device, dtype=torch.float32)
+            traj_length_out[local_idx] = s_total
 
         self._traj_pts[env_ids] = pts_out
         self._traj_tangents[env_ids] = tangents_out
         self._traj_s_norm[env_ids] = s_norm_out
+        self._traj_length_m[env_ids] = traj_length_out
 
         if traj_model in {"rs_exact", "rs_forward_preferred"} and fallback_count > 0:
             print(
@@ -1884,6 +1912,54 @@ class ForkliftPalletInsertLiftEnv(DirectRLEnv):
 
         return min_dists, yaw_traj_err_deg, s_traj_norm
 
+    def _query_reference_trajectory_lookahead(
+        self,
+        *,
+        lookahead_steps: int,
+        lookahead_arc_m: float = 0.0,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Return distance/yaw/progress to a fixed-arc lookahead point on the episode guide."""
+        if not bool(getattr(self.cfg, "use_reference_trajectory", True)):
+            zeros = torch.zeros((self.num_envs,), device=self.device)
+            return zeros, zeros, zeros
+
+        fork_center = self._compute_fork_center()
+        query_pos = fork_center[:, :2]
+        robot_yaw = _quat_to_yaw(self.robot.data.root_quat_w)
+
+        dists = torch.norm(self._traj_pts - query_pos.unsqueeze(1), dim=-1)
+        _, min_indices = torch.min(dists, dim=1)
+
+        env_arange = torch.arange(self.num_envs, device=self.device)
+        closest_s_norm = self._traj_s_norm[env_arange, min_indices]
+        if lookahead_arc_m > 0.0:
+            s_delta = float(lookahead_arc_m) / torch.clamp(self._traj_length_m, min=1e-6)
+        else:
+            # Backward-compatible fallback: interpret the old step count as a nominal
+            # normalized arclength offset, then query by s_norm instead of index.
+            s_delta = torch.full_like(
+                closest_s_norm,
+                max(1, int(lookahead_steps)) / max(self._traj_pts.shape[1] - 1, 1),
+            )
+        target_s_norm = torch.clamp(closest_s_norm + s_delta, max=1.0)
+        target_mask = self._traj_s_norm >= target_s_norm.unsqueeze(1)
+        first_target_indices = torch.argmax(target_mask.to(torch.int64), dim=1)
+        last_index = torch.full_like(first_target_indices, self._traj_pts.shape[1] - 1)
+        target_indices = torch.where(target_mask.any(dim=1), first_target_indices, last_index)
+
+        target_pts = self._traj_pts[env_arange, target_indices]
+        target_tangent = self._traj_tangents[env_arange, target_indices]
+        s_traj_norm = self._traj_s_norm[env_arange, target_indices]
+
+        target_dists = torch.norm(target_pts - query_pos, dim=-1)
+        target_yaw = torch.atan2(target_tangent[:, 1], target_tangent[:, 0])
+        yaw_err = torch.atan2(
+            torch.sin(robot_yaw - target_yaw),
+            torch.cos(robot_yaw - target_yaw),
+        )
+        yaw_traj_err_deg = torch.abs(yaw_err) * (180.0 / math.pi)
+        return target_dists, yaw_traj_err_deg, s_traj_norm
+
     def _compute_phi_align(self, env_ids: torch.Tensor | None = None) -> torch.Tensor:
         """计算对齐势函数 phi_align（与 _get_rewards 同源几何）。
 
@@ -1939,7 +2015,10 @@ class ForkliftPalletInsertLiftEnv(DirectRLEnv):
         else:
             raise RuntimeError(f"[camera:{label}] unexpected rgb shape={tuple(rgb.shape)}")
 
-        rgb = rgb.float()
+        if rgb.dtype == torch.uint8:
+            rgb = rgb.float() / 255.0
+        else:
+            rgb = rgb.float()
         if rgb.max() > 1.0:
             rgb = rgb / 255.0
         rgb = torch.clamp(rgb, 0.0, 1.0)
@@ -2188,6 +2267,56 @@ class ForkliftPalletInsertLiftEnv(DirectRLEnv):
         obs21 = torch.cat([edge_obs, proprio], dim=-1)  # (N, 21)
 
         return {"policy": obs21}
+
+    def _load_progress_teacher_action_guidance_policy(self):
+        checkpoint = str(getattr(self.cfg, "progress_teacher_action_guidance_checkpoint", "") or "")
+        if not checkpoint:
+            raise RuntimeError("progress_teacher_action_guidance_checkpoint is empty")
+        checkpoint_path = Path(checkpoint)
+        if not checkpoint_path.is_file():
+            raise FileNotFoundError(f"Teacher action guidance checkpoint not found: {checkpoint}")
+
+        sample_obs = {
+            "policy": torch.zeros((1, 21), device=self.device),
+            "critic": torch.zeros((1, 21), device=self.device),
+        }
+        policy = ClampedActorCritic(
+            obs=sample_obs,
+            obs_groups={"policy": ["policy"], "critic": ["policy"]},
+            num_actions=2,
+            actor_obs_normalization=True,
+            critic_obs_normalization=True,
+            actor_hidden_dims=[256, 256, 128],
+            critic_hidden_dims=[256, 256, 128],
+            activation="elu",
+            init_noise_std=0.65,
+            noise_std_type="log",
+        ).to(self.device)
+        payload = torch.load(checkpoint_path, map_location=self.device, weights_only=False)
+        policy.load_state_dict(payload.get("model_state_dict", payload), strict=True)
+        policy.eval()
+        for param in policy.parameters():
+            param.requires_grad_(False)
+        print(f"[INFO]: Loaded progress teacher action guidance checkpoint: {checkpoint_path}")
+        return policy
+
+    def _get_progress_teacher_action_guidance_target(self) -> torch.Tensor:
+        if self._progress_teacher_action_guidance_policy is None:
+            self._progress_teacher_action_guidance_policy = self._load_progress_teacher_action_guidance_policy()
+        geo_obs = self._get_observations_geo_edge()["policy"]
+        teacher_obs = {"policy": geo_obs, "critic": geo_obs}
+        with torch.inference_mode():
+            teacher_action = self._progress_teacher_action_guidance_policy.act_inference(teacher_obs)
+            clip = float(getattr(self.cfg, "progress_teacher_action_guidance_clip", 1.0))
+            teacher_action = torch.clamp(teacher_action, -clip, clip)
+        return teacher_action.detach()
+
+    def _get_progress_teacher_action_guidance(self) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        teacher_action = self._progress_teacher_action_guidance_target
+        student_action = self.actions[:, :2]
+        mse_per_env = ((student_action - teacher_action) ** 2).mean(dim=1)
+        reward = -float(getattr(self.cfg, "progress_teacher_action_guidance_weight", 0.0)) * mse_per_env
+        return reward, mse_per_env, teacher_action.detach()
 
     # ==========================================================================
     #  Easy8 / Privileged / 主观测入口
@@ -3255,6 +3384,369 @@ class ForkliftPalletInsertLiftEnv(DirectRLEnv):
             * clean_gate
             * (center_y_delta + tip_y_delta)
         )
+        curve_guidance_reward = torch.zeros((self.num_envs,), device=self.device)
+        curve_guidance_score = torch.zeros((self.num_envs,), device=self.device)
+        curve_guidance_delta = torch.zeros((self.num_envs,), device=self.device)
+        curve_guidance_gate = torch.zeros((self.num_envs,), device=self.device)
+        curve_d_traj = torch.zeros((self.num_envs,), device=self.device)
+        curve_yaw_err_deg = torch.zeros((self.num_envs,), device=self.device)
+        curve_s_norm = torch.zeros((self.num_envs,), device=self.device)
+        curve_lookahead_reward = torch.zeros((self.num_envs,), device=self.device)
+        curve_lookahead_score = torch.zeros((self.num_envs,), device=self.device)
+        curve_lookahead_delta = torch.zeros((self.num_envs,), device=self.device)
+        curve_lookahead_gate = torch.zeros((self.num_envs,), device=self.device)
+        curve_lookahead_d = torch.zeros((self.num_envs,), device=self.device)
+        curve_lookahead_yaw_err_deg = torch.zeros((self.num_envs,), device=self.device)
+        curve_lookahead_s_norm = torch.zeros((self.num_envs,), device=self.device)
+        curve_corridor_reward = torch.zeros((self.num_envs,), device=self.device)
+        curve_corridor_score = torch.zeros((self.num_envs,), device=self.device)
+        curve_corridor_delta = torch.zeros((self.num_envs,), device=self.device)
+        curve_corridor_gate = torch.zeros((self.num_envs,), device=self.device)
+        curve_corridor_quality = torch.zeros((self.num_envs,), device=self.device)
+        curve_phase_gate = torch.ones((self.num_envs,), device=self.device)
+        insertion_stage_gate = torch.ones((self.num_envs,), device=self.device)
+        pre_align_ready = torch.zeros((self.num_envs,), dtype=torch.bool, device=self.device)
+        pre_align_newly_latched = torch.zeros((self.num_envs,), dtype=torch.bool, device=self.device)
+        pre_align_released = torch.zeros((self.num_envs,), dtype=torch.bool, device=self.device)
+        pre_align_latch_keep = torch.ones((self.num_envs,), dtype=torch.bool, device=self.device)
+        pre_align_latched_float = torch.zeros((self.num_envs,), device=self.device)
+        pre_align_axis_err = torch.zeros((self.num_envs,), device=self.device)
+        pre_align_current_quality_gate = torch.ones((self.num_envs,), device=self.device)
+        r_pre_align_latch_bonus = torch.zeros((self.num_envs,), device=self.device)
+        if bool(getattr(self.cfg, "progress_teacher_curve_corridor_enable", False)):
+            curve_corridor_gate = smoothstep(
+                (
+                    float(getattr(self.cfg, "progress_teacher_curve_corridor_near_gate_m", 1.05))
+                    - stage_dist_front
+                )
+                / max(float(getattr(self.cfg, "progress_teacher_curve_corridor_near_gate_ramp_m", 0.65)), 1e-6)
+            )
+            curve_corridor_quality = torch.exp(
+                -(
+                    center_y_err
+                    / max(float(getattr(self.cfg, "progress_teacher_curve_corridor_center_sigma_m", 0.26)), 1e-6)
+                )
+                ** 2
+                - (
+                    tip_y_err
+                    / max(float(getattr(self.cfg, "progress_teacher_curve_corridor_tip_sigma_m", 0.24)), 1e-6)
+                )
+                ** 2
+                - (
+                    yaw_err_deg
+                    / max(float(getattr(self.cfg, "progress_teacher_curve_corridor_yaw_sigma_deg", 10.0)), 1e-6)
+                )
+                ** 2
+            )
+            curve_corridor_score = (
+                curve_corridor_quality
+                * curve_corridor_gate
+                * approach_active
+                * push_gate
+                * clean_gate
+            )
+            curve_corridor_delta = torch.clamp(
+                curve_corridor_score - self._prev_progress_curve_corridor_score,
+                min=-0.25,
+                max=0.25,
+            )
+            curve_corridor_delta = torch.where(
+                self._is_first_step,
+                torch.zeros_like(curve_corridor_delta),
+                curve_corridor_delta,
+            )
+            curve_corridor_reward = (
+                float(getattr(self.cfg, "progress_teacher_curve_corridor_weight", 0.0))
+                * torch.clamp(curve_corridor_delta, min=0.0)
+            )
+        if bool(getattr(self.cfg, "progress_teacher_curve_phase_gate_enable", False)):
+            phase_quality = torch.exp(
+                -(
+                    center_y_err
+                    / max(float(getattr(self.cfg, "progress_teacher_curve_phase_gate_center_sigma_m", 0.16)), 1e-6)
+                )
+                ** 2
+                - (
+                    tip_y_err
+                    / max(float(getattr(self.cfg, "progress_teacher_curve_phase_gate_tip_sigma_m", 0.16)), 1e-6)
+                )
+                ** 2
+                - (
+                    yaw_err_deg
+                    / max(float(getattr(self.cfg, "progress_teacher_curve_phase_gate_yaw_sigma_deg", 6.0)), 1e-6)
+                )
+                ** 2
+            )
+            phase_floor = float(getattr(self.cfg, "progress_teacher_curve_phase_gate_floor", 0.0))
+            curve_phase_gate = torch.clamp(
+                phase_floor + (1.0 - phase_floor) * phase_quality,
+                min=0.0,
+                max=1.0,
+            )
+        if bool(getattr(self.cfg, "progress_teacher_curve_guidance_enable", False)):
+            curve_d_traj, curve_yaw_err_deg, curve_s_norm = self._query_reference_trajectory()
+            curve_dist_score = torch.exp(
+                -(
+                    curve_d_traj
+                    / max(float(getattr(self.cfg, "progress_teacher_curve_distance_sigma_m", 0.50)), 1e-6)
+                )
+                ** 2
+            )
+            curve_yaw_score = torch.exp(
+                -(
+                    curve_yaw_err_deg
+                    / max(float(getattr(self.cfg, "progress_teacher_curve_yaw_sigma_deg", 20.0)), 1e-6)
+                )
+                ** 2
+            )
+            curve_guidance_gate = smoothstep(
+                (
+                    float(getattr(self.cfg, "progress_teacher_curve_near_gate_m", 3.2))
+                    - stage_dist_front
+                )
+                / max(float(getattr(self.cfg, "progress_teacher_curve_near_gate_ramp_m", 1.0)), 1e-6)
+            )
+            curve_guidance_score = (
+                curve_dist_score
+                * curve_yaw_score
+                * curve_guidance_gate
+                * approach_active
+                * push_gate
+                * clean_gate
+            )
+            curve_guidance_delta = torch.clamp(
+                curve_guidance_score - self._prev_progress_curve_score,
+                min=-0.25,
+                max=0.25,
+            )
+            curve_progress_delta = torch.clamp(
+                curve_s_norm - self._prev_phi_traj,
+                min=0.0,
+                max=0.05,
+            )
+            curve_guidance_reward = (
+                float(getattr(self.cfg, "progress_teacher_curve_guidance_weight", 0.0))
+                * torch.clamp(curve_guidance_delta, min=0.0)
+                + float(getattr(self.cfg, "progress_teacher_curve_progress_weight", 0.0))
+                * curve_progress_delta
+                * curve_guidance_score
+            )
+        if bool(getattr(self.cfg, "progress_teacher_curve_lookahead_enable", False)):
+            (
+                curve_lookahead_d,
+                curve_lookahead_yaw_err_deg,
+                curve_lookahead_s_norm,
+            ) = self._query_reference_trajectory_lookahead(
+                lookahead_steps=int(getattr(self.cfg, "progress_teacher_curve_lookahead_steps", 5)),
+                lookahead_arc_m=float(getattr(self.cfg, "progress_teacher_curve_lookahead_arc_m", 0.0)),
+            )
+            curve_lookahead_dist_score = torch.exp(
+                -(
+                    curve_lookahead_d
+                    / max(
+                        float(getattr(self.cfg, "progress_teacher_curve_lookahead_distance_sigma_m", 0.35)),
+                        1e-6,
+                    )
+                )
+                ** 2
+            )
+            curve_lookahead_yaw_score = torch.exp(
+                -(
+                    curve_lookahead_yaw_err_deg
+                    / max(
+                        float(getattr(self.cfg, "progress_teacher_curve_lookahead_yaw_sigma_deg", 16.0)),
+                        1e-6,
+                    )
+                )
+                ** 2
+            )
+            curve_lookahead_gate = smoothstep(
+                (
+                    float(getattr(self.cfg, "progress_teacher_curve_near_gate_m", 3.2))
+                    - stage_dist_front
+                )
+                / max(float(getattr(self.cfg, "progress_teacher_curve_near_gate_ramp_m", 1.0)), 1e-6)
+            )
+            curve_lookahead_score = (
+                curve_lookahead_dist_score
+                * curve_lookahead_yaw_score
+                * curve_lookahead_gate
+                * approach_active
+                * push_gate
+                * clean_gate
+            )
+            curve_lookahead_delta = torch.clamp(
+                curve_lookahead_score - self._prev_progress_curve_lookahead_score,
+                min=-0.25,
+                max=0.25,
+            )
+            curve_lookahead_delta = torch.where(
+                self._is_first_step,
+                torch.zeros_like(curve_lookahead_delta),
+                curve_lookahead_delta,
+            )
+            curve_lookahead_reward = (
+                float(getattr(self.cfg, "progress_teacher_curve_lookahead_weight", 0.0))
+                * torch.clamp(curve_lookahead_delta, min=0.0)
+            )
+            if bool(getattr(self.cfg, "progress_teacher_curve_corridor_gate_lookahead", False)):
+                lookahead_floor = float(getattr(self.cfg, "progress_teacher_curve_corridor_lookahead_floor", 0.25))
+                lookahead_quality_gate = torch.clamp(
+                    lookahead_floor + (1.0 - lookahead_floor) * curve_corridor_quality,
+                    min=0.0,
+                    max=1.0,
+                )
+                curve_lookahead_reward = curve_lookahead_reward * lookahead_quality_gate
+        insertion_stage_gate = curve_phase_gate
+        if bool(getattr(self.cfg, "progress_teacher_pre_align_latch_enable", False)):
+            s_center = torch.sum(rel_fc * u_in, dim=-1)
+            pre_align_target_s = torch.full_like(s_center, float(self._exp83_traj_goal_s()))
+            pre_align_axis_err = torch.abs(s_center - pre_align_target_s)
+            axis_limit_m = float(getattr(self.cfg, "progress_teacher_pre_align_latch_axis_m", 0.0))
+            axis_ready = (
+                pre_align_axis_err <= axis_limit_m
+                if axis_limit_m > 0.0
+                else torch.ones((self.num_envs,), dtype=torch.bool, device=self.device)
+            )
+            pre_align_ready = (
+                axis_ready
+                & (stage_dist_front <= float(getattr(self.cfg, "progress_teacher_pre_align_latch_dist_front_m", 0.45)))
+                & (center_y_err <= float(getattr(self.cfg, "progress_teacher_pre_align_latch_center_m", 0.20)))
+                & (tip_y_err <= float(getattr(self.cfg, "progress_teacher_pre_align_latch_tip_m", 0.22)))
+                & (yaw_err_deg <= float(getattr(self.cfg, "progress_teacher_pre_align_latch_yaw_deg", 8.0)))
+                & (insert_norm <= float(getattr(self.cfg, "progress_teacher_pre_align_latch_max_insert_norm", 0.12)))
+                & valid_insert_z
+                & (clean_gate > 0.5)
+            )
+            prev_pre_align_latched = self._progress_teacher_pre_align_latched.clone()
+            if bool(getattr(self.cfg, "progress_teacher_pre_align_latch_release_enable", False)):
+                release_axis_limit_m = float(
+                    getattr(self.cfg, "progress_teacher_pre_align_latch_release_axis_m", axis_limit_m)
+                )
+                release_axis_ready = (
+                    pre_align_axis_err <= release_axis_limit_m
+                    if release_axis_limit_m > 0.0
+                    else torch.ones((self.num_envs,), dtype=torch.bool, device=self.device)
+                )
+                pre_align_latch_keep = (
+                    release_axis_ready
+                    & (
+                        stage_dist_front
+                        <= float(
+                            getattr(
+                                self.cfg,
+                                "progress_teacher_pre_align_latch_release_dist_front_m",
+                                getattr(self.cfg, "progress_teacher_pre_align_latch_dist_front_m", 0.45),
+                            )
+                        )
+                    )
+                    & (
+                        center_y_err
+                        <= float(
+                            getattr(
+                                self.cfg,
+                                "progress_teacher_pre_align_latch_release_center_m",
+                                getattr(self.cfg, "progress_teacher_pre_align_latch_center_m", 0.20),
+                            )
+                        )
+                    )
+                    & (
+                        tip_y_err
+                        <= float(
+                            getattr(
+                                self.cfg,
+                                "progress_teacher_pre_align_latch_release_tip_m",
+                                getattr(self.cfg, "progress_teacher_pre_align_latch_tip_m", 0.22),
+                            )
+                        )
+                    )
+                    & (
+                        yaw_err_deg
+                        <= float(
+                            getattr(
+                                self.cfg,
+                                "progress_teacher_pre_align_latch_release_yaw_deg",
+                                getattr(self.cfg, "progress_teacher_pre_align_latch_yaw_deg", 8.0),
+                            )
+                        )
+                    )
+                    & (
+                        insert_norm
+                        <= float(
+                            getattr(
+                                self.cfg,
+                                "progress_teacher_pre_align_latch_release_max_insert_norm",
+                                getattr(self.cfg, "progress_teacher_pre_align_latch_max_insert_norm", 0.12),
+                            )
+                        )
+                    )
+                    & valid_insert_z
+                    & (clean_gate > 0.5)
+                )
+                pre_align_latched = (prev_pre_align_latched & pre_align_latch_keep) | pre_align_ready
+            else:
+                pre_align_latched = prev_pre_align_latched | pre_align_ready
+            self._progress_teacher_pre_align_latched[:] = pre_align_latched.detach()
+            pre_align_newly_latched = pre_align_latched & (~prev_pre_align_latched)
+            pre_align_released = prev_pre_align_latched & (~pre_align_latched)
+            pre_align_latched_float = pre_align_latched.float()
+            latch_floor = float(getattr(self.cfg, "progress_teacher_pre_align_latch_gate_floor", 0.0))
+            insertion_stage_gate = torch.clamp(
+                latch_floor + (1.0 - latch_floor) * pre_align_latched_float,
+                min=0.0,
+                max=1.0,
+            )
+            if bool(getattr(self.cfg, "progress_teacher_pre_align_latch_require_current_quality", False)):
+                current_quality = torch.exp(
+                    -(
+                        center_y_err
+                        / max(
+                            float(getattr(self.cfg, "progress_teacher_pre_align_latch_current_center_sigma_m", 0.22)),
+                            1e-6,
+                        )
+                    )
+                    ** 2
+                    - (
+                        tip_y_err
+                        / max(
+                            float(getattr(self.cfg, "progress_teacher_pre_align_latch_current_tip_sigma_m", 0.22)),
+                            1e-6,
+                        )
+                    )
+                    ** 2
+                    - (
+                        yaw_err_deg
+                        / max(
+                            float(getattr(self.cfg, "progress_teacher_pre_align_latch_current_yaw_sigma_deg", 8.0)),
+                            1e-6,
+                        )
+                    )
+                    ** 2
+                )
+                current_floor = float(getattr(self.cfg, "progress_teacher_pre_align_latch_current_floor", 0.0))
+                pre_align_current_quality_gate = torch.clamp(
+                    current_floor + (1.0 - current_floor) * current_quality,
+                    min=0.0,
+                    max=1.0,
+                )
+                insertion_stage_gate = insertion_stage_gate * pre_align_current_quality_gate
+            r_pre_align_latch_bonus = (
+                float(getattr(self.cfg, "progress_teacher_pre_align_latch_reward_weight", 0.0))
+                * pre_align_newly_latched.float()
+            )
+            if bool(getattr(self.cfg, "progress_teacher_pre_align_latch_curve_only_before_ready", False)):
+                pre_align_pending = 1.0 - pre_align_latched_float
+                curve_guidance_reward = curve_guidance_reward * pre_align_pending
+                curve_lookahead_reward = curve_lookahead_reward * pre_align_pending
+                curve_corridor_reward = curve_corridor_reward * pre_align_pending
+
+        def _masked_mean(values: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
+            mask_f = mask.float()
+            return torch.sum(values * mask_f) / mask_f.sum().clamp_min(1.0)
+
+        r_insert = r_insert * insertion_stage_gate
+        r_commit_progress = r_commit_progress * insertion_stage_gate
+        r_commit_forward = r_commit_forward * insertion_stage_gate
         min_commit_forward = float(getattr(self.cfg, "progress_teacher_min_commit_forward_action", 0.25))
         not_committing = torch.clamp(
             (min_commit_forward - self.actions[:, 0]) / max(min_commit_forward, 1e-6),
@@ -3283,12 +3775,22 @@ class ForkliftPalletInsertLiftEnv(DirectRLEnv):
             * insert_gate
             * push_gate
             * clean_gate
+            * insertion_stage_gate
         )
 
         action_penalty = (
             float(getattr(self.cfg, "progress_teacher_action_l2", -0.01))
             * (self.actions[:, :2] ** 2).sum(dim=1)
         )
+        action_guidance_reward = torch.zeros_like(action_penalty)
+        action_guidance_mse = torch.zeros_like(action_penalty)
+        action_guidance_teacher_action = torch.zeros_like(self.actions[:, :2])
+        if bool(getattr(self.cfg, "progress_teacher_action_guidance_enable", False)):
+            (
+                action_guidance_reward,
+                action_guidance_mse,
+                action_guidance_teacher_action,
+            ) = self._get_progress_teacher_action_guidance()
         fork_speed_xy = torch.norm(self.robot.data.root_vel_w[:, :2], dim=-1)
         speed_excess = torch.clamp(
             fork_speed_xy - float(getattr(self.cfg, "progress_teacher_speed_penalty_thresh_mps", 0.07)),
@@ -3439,6 +3941,7 @@ class ForkliftPalletInsertLiftEnv(DirectRLEnv):
         )
         success = self._hold_counter >= self._hold_steps
         self._last_hold_entry = still_ok
+        done_success = self._success_termination.clone()
         self._success_termination = success
 
         hold_delta = torch.clamp(
@@ -3446,7 +3949,11 @@ class ForkliftPalletInsertLiftEnv(DirectRLEnv):
             min=0.0,
             max=1.0,
         )
-        r_hold_progress = float(getattr(self.cfg, "progress_teacher_hold_weight", 20.0)) * hold_delta
+        r_hold_progress = (
+            float(getattr(self.cfg, "progress_teacher_hold_weight", 20.0))
+            * hold_delta
+            * insertion_stage_gate
+        )
 
         time_ratio = self.episode_length_buf.float() / (self.max_episode_length + 1e-6)
         time_bonus = self.cfg.rew_success_time * (1.0 - time_ratio)
@@ -3469,12 +3976,17 @@ class ForkliftPalletInsertLiftEnv(DirectRLEnv):
             + r_commit_forward
             + r_aligned_approach_progress
             + r_near_align_progress
+            + curve_guidance_reward
+            + curve_lookahead_reward
+            + curve_corridor_reward
+            + r_pre_align_latch_bonus
             + mouth_stall_penalty
             + align_potential
             + insert_potential
             + r_hold_progress
             + r_terminal
             + action_penalty
+            + action_guidance_reward
             + speed_penalty
             + time_penalty
             + distance_penalty
@@ -3493,6 +4005,13 @@ class ForkliftPalletInsertLiftEnv(DirectRLEnv):
         self._prev_tip_axis = s_tip.detach()
         self._prev_yaw_err_deg = yaw_err_deg.detach()
         self._prev_insert_norm = insert_norm.detach()
+        if bool(getattr(self.cfg, "progress_teacher_curve_guidance_enable", False)):
+            self._prev_progress_curve_score = curve_guidance_score.detach()
+            self._prev_phi_traj = curve_s_norm.detach()
+        if bool(getattr(self.cfg, "progress_teacher_curve_lookahead_enable", False)):
+            self._prev_progress_curve_lookahead_score = curve_lookahead_score.detach()
+        if bool(getattr(self.cfg, "progress_teacher_curve_corridor_enable", False)):
+            self._prev_progress_curve_corridor_score = curve_corridor_score.detach()
         self._prev_dist_front = dist_front_tip.detach()
         self._prev_lift_height = lift_height.detach()
         self._is_first_step[:] = False
@@ -3500,6 +4019,9 @@ class ForkliftPalletInsertLiftEnv(DirectRLEnv):
         push_free = episode_pallet_disp_xy < self.cfg.push_free_disp_thresh_m
         inserted_push_free = insert_entry & push_free
         dirty_insert = insert_entry & (~push_free)
+        pre_align_latched_bool = pre_align_latched_float > 0.5
+        pre_align_latched_inserted = pre_align_latched_bool & insert_entry
+        pre_align_latched_dirty_insert = pre_align_latched_bool & dirty_insert
 
         if "log" not in self.extras:
             self.extras["log"] = {}
@@ -3512,12 +4034,50 @@ class ForkliftPalletInsertLiftEnv(DirectRLEnv):
         self.extras["log"]["progress_teacher/r_commit_forward"] = r_commit_forward.mean()
         self.extras["log"]["progress_teacher/r_aligned_approach_progress"] = r_aligned_approach_progress.mean()
         self.extras["log"]["progress_teacher/r_near_align_progress"] = r_near_align_progress.mean()
+        self.extras["log"]["progress_teacher/r_curve_guidance"] = curve_guidance_reward.mean()
+        self.extras["log"]["progress_teacher/curve_guidance_score"] = curve_guidance_score.mean()
+        self.extras["log"]["progress_teacher/curve_guidance_delta"] = curve_guidance_delta.mean()
+        self.extras["log"]["progress_teacher/curve_guidance_gate"] = curve_guidance_gate.mean()
+        self.extras["log"]["progress_teacher/curve_d_traj"] = curve_d_traj.mean()
+        self.extras["log"]["progress_teacher/curve_yaw_err_deg"] = curve_yaw_err_deg.mean()
+        self.extras["log"]["progress_teacher/curve_s_norm"] = curve_s_norm.mean()
+        self.extras["log"]["progress_teacher/r_curve_lookahead"] = curve_lookahead_reward.mean()
+        self.extras["log"]["progress_teacher/curve_lookahead_score"] = curve_lookahead_score.mean()
+        self.extras["log"]["progress_teacher/curve_lookahead_delta"] = curve_lookahead_delta.mean()
+        self.extras["log"]["progress_teacher/curve_lookahead_gate"] = curve_lookahead_gate.mean()
+        self.extras["log"]["progress_teacher/curve_lookahead_d"] = curve_lookahead_d.mean()
+        self.extras["log"]["progress_teacher/curve_lookahead_yaw_err_deg"] = curve_lookahead_yaw_err_deg.mean()
+        self.extras["log"]["progress_teacher/curve_lookahead_s_norm"] = curve_lookahead_s_norm.mean()
+        self.extras["log"]["progress_teacher/r_curve_corridor"] = curve_corridor_reward.mean()
+        self.extras["log"]["progress_teacher/curve_corridor_score"] = curve_corridor_score.mean()
+        self.extras["log"]["progress_teacher/curve_corridor_delta"] = curve_corridor_delta.mean()
+        self.extras["log"]["progress_teacher/curve_corridor_gate"] = curve_corridor_gate.mean()
+        self.extras["log"]["progress_teacher/curve_corridor_quality"] = curve_corridor_quality.mean()
+        self.extras["log"]["progress_teacher/curve_phase_gate"] = curve_phase_gate.mean()
+        self.extras["log"]["progress_teacher/insertion_stage_gate"] = insertion_stage_gate.mean()
+        self.extras["log"]["progress_teacher/r_pre_align_latch_bonus"] = r_pre_align_latch_bonus.mean()
+        self.extras["log"]["progress_teacher/pre_align_axis_err"] = pre_align_axis_err.mean()
+        self.extras["log"]["progress_teacher/pre_align_current_quality_gate"] = (
+            pre_align_current_quality_gate.mean()
+        )
+        self.extras["log"]["phase/frac_pre_align_latch_keep"] = pre_align_latch_keep.float().mean()
+        self.extras["log"]["phase/frac_pre_align_released"] = pre_align_released.float().mean()
         self.extras["log"]["progress_teacher/mouth_stall_penalty"] = mouth_stall_penalty.mean()
         self.extras["log"]["progress_teacher/align_potential"] = align_potential.mean()
         self.extras["log"]["progress_teacher/insert_potential"] = insert_potential.mean()
         self.extras["log"]["progress_teacher/r_hold_progress"] = r_hold_progress.mean()
         self.extras["log"]["progress_teacher/r_terminal"] = r_terminal.mean()
         self.extras["log"]["progress_teacher/action_penalty"] = action_penalty.mean()
+        self.extras["log"]["progress_teacher/action_guidance_reward"] = action_guidance_reward.mean()
+        self.extras["log"]["progress_teacher/action_guidance_mse"] = action_guidance_mse.mean()
+        self.extras["log"]["progress_teacher/action_guidance_teacher_drive"] = (
+            action_guidance_teacher_action[:, 0].mean()
+        )
+        self.extras["log"]["progress_teacher/action_guidance_teacher_steer"] = (
+            action_guidance_teacher_action[:, 1].mean()
+        )
+        self.extras["log"]["progress_teacher/action_guidance_student_drive"] = self.actions[:, 0].mean()
+        self.extras["log"]["progress_teacher/action_guidance_student_steer"] = self.actions[:, 1].mean()
         self.extras["log"]["progress_teacher/speed_penalty"] = speed_penalty.mean()
         self.extras["log"]["progress_teacher/push_penalty"] = push_penalty.mean()
         self.extras["log"]["progress_teacher/dirty_insert_penalty"] = dirty_insert_penalty.mean()
@@ -3576,6 +4136,21 @@ class ForkliftPalletInsertLiftEnv(DirectRLEnv):
         self.extras["log"]["diag/progress_teacher_dirty_insert_termination_frac"] = (
             dirty_insert_event.float().mean()
         )
+        self.extras["log"]["diag/pre_align_latched_dirty_insert_frac_of_latched_inserted"] = _masked_mean(
+            dirty_insert.float(), pre_align_latched_inserted
+        )
+        self.extras["log"]["diag/pre_align_latched_aligned_frac_of_latched_inserted"] = _masked_mean(
+            align_entry.float(), pre_align_latched_inserted
+        )
+        self.extras["log"]["err/pre_align_latched_center_lateral_mean"] = _masked_mean(
+            center_y_err, pre_align_latched_inserted
+        )
+        self.extras["log"]["err/pre_align_latched_tip_lateral_mean"] = _masked_mean(
+            tip_y_err, pre_align_latched_inserted
+        )
+        self.extras["log"]["err/pre_align_latched_yaw_deg_mean"] = _masked_mean(
+            yaw_err_deg, pre_align_latched_inserted
+        )
         self.extras["log"]["phase/frac_inserted"] = insert_entry.float().mean()
         self.extras["log"]["phase/frac_geom_success"] = success.float().mean()
         self.extras["log"]["phase/frac_success"] = success.float().mean()
@@ -3584,28 +4159,36 @@ class ForkliftPalletInsertLiftEnv(DirectRLEnv):
         self.extras["log"]["phase/frac_inserted_push_free"] = inserted_push_free.float().mean()
         self.extras["log"]["phase/frac_dirty_insert"] = dirty_insert.float().mean()
         self.extras["log"]["phase/frac_aligned"] = align_entry.float().mean()
+        self.extras["log"]["phase/frac_pre_align_ready"] = pre_align_ready.float().mean()
+        self.extras["log"]["phase/frac_pre_align_latched"] = pre_align_latched_float.mean()
+        self.extras["log"]["phase/frac_pre_align_newly_latched"] = pre_align_newly_latched.float().mean()
+        self.extras["log"]["phase/frac_pre_align_latched_inserted"] = pre_align_latched_inserted.float().mean()
+        self.extras["log"]["phase/frac_pre_align_latched_dirty_insert"] = (
+            pre_align_latched_dirty_insert.float().mean()
+        )
         self.extras["log"]["phase/hold_counter_mean"] = self._hold_counter.mean()
         self.extras["log"]["phase/grace_zone_frac"] = grace_zone.float().mean()
 
         with torch.no_grad():
-            if self.reset_terminated.any():
-                batch_rate = success[self.reset_terminated].float().mean()
-            else:
-                batch_rate = success.float().mean()
-            if not hasattr(self, "_ep_success_rate_ema"):
-                self._ep_success_rate_ema = batch_rate
-                self._ep_success_count = torch.tensor(0.0, device=self.device)
-                self._ep_done_count = torch.tensor(0.0, device=self.device)
-            alpha = 0.05
-            self._ep_success_rate_ema = (
-                (1 - alpha) * self._ep_success_rate_ema + alpha * batch_rate
-            )
-            if self.reset_terminated.any():
-                self._ep_success_count += success[self.reset_terminated].float().sum()
-                self._ep_done_count += self.reset_terminated.float().sum()
-        self.extras["log"]["episode/success_rate_ema"] = self._ep_success_rate_ema
+            done_mask = self.reset_buf
+            if done_mask.any():
+                num_done = done_mask.float().sum()
+                num_success = (done_success & done_mask).float().sum()
+                batch_rate = num_success / torch.clamp(num_done, min=1.0)
+                if float(self._progress_teacher_ep_done_count.item()) <= 0.0:
+                    self._progress_teacher_ep_success_rate_ema = batch_rate
+                else:
+                    alpha = 0.05
+                    self._progress_teacher_ep_success_rate_ema = (
+                        (1 - alpha) * self._progress_teacher_ep_success_rate_ema
+                        + alpha * batch_rate
+                    )
+                self._progress_teacher_ep_success_count += num_success
+                self._progress_teacher_ep_done_count += num_done
+        self.extras["log"]["episode/success_rate_ema"] = self._progress_teacher_ep_success_rate_ema
         self.extras["log"]["episode/success_rate_total"] = (
-            self._ep_success_count / torch.clamp(self._ep_done_count, min=1.0)
+            self._progress_teacher_ep_success_count
+            / torch.clamp(self._progress_teacher_ep_done_count, min=1.0)
         )
 
         return rew
@@ -5427,6 +6010,7 @@ class ForkliftPalletInsertLiftEnv(DirectRLEnv):
         self._preinsert_push_termination[env_ids] = False
         self._dirty_push_termination[env_ids] = False
         self._progress_teacher_dirty_insert_termination[env_ids] = False
+        self._progress_teacher_pre_align_latched[env_ids] = False
         self._prev_lift_height[env_ids] = 0.0
         self._is_first_step[env_ids] = True
         self._lift_pos_target[env_ids] = 0.0
@@ -5649,6 +6233,9 @@ class ForkliftPalletInsertLiftEnv(DirectRLEnv):
         # Exp8.3 B0′：在写入 pallet / robot / joint 之后，用 reset 张量生成参考轨迹，
         # 避免旧 episode 位姿污染 r_cd / r_cpsi。
         self._prev_phi_traj[env_ids] = 0.0
+        self._prev_progress_curve_score[env_ids] = 0.0
+        self._prev_progress_curve_lookahead_score[env_ids] = 0.0
+        self._prev_progress_curve_corridor_score[env_ids] = 0.0
         if bool(getattr(self.cfg, "use_reference_trajectory", True)):
             lift_j = joint_pos[:, self._lift_id]
             fc3 = self._compute_fork_center_from_root_lift(pos, quat, lift_j)
@@ -5716,6 +6303,34 @@ class ForkliftPalletInsertLiftEnv(DirectRLEnv):
             dist_front_reset = torch.clamp(s_front_reset - s_base_reset, min=0.0)
         else:
             dist_front_reset = true_dist_front_reset
+
+        if bool(getattr(self.cfg, "progress_teacher_curve_guidance_enable", False)):
+            d_traj_reset, yaw_traj_reset, s_traj_reset = self._query_reference_trajectory()
+            curve_dist_score_reset = torch.exp(
+                -(
+                    d_traj_reset[env_ids]
+                    / max(float(getattr(self.cfg, "progress_teacher_curve_distance_sigma_m", 0.50)), 1e-6)
+                )
+                ** 2
+            )
+            curve_yaw_score_reset = torch.exp(
+                -(
+                    yaw_traj_reset[env_ids]
+                    / max(float(getattr(self.cfg, "progress_teacher_curve_yaw_sigma_deg", 20.0)), 1e-6)
+                )
+                ** 2
+            )
+            curve_gate_reset = smoothstep(
+                (
+                    float(getattr(self.cfg, "progress_teacher_curve_near_gate_m", 3.2))
+                    - dist_front_reset
+                )
+                / max(float(getattr(self.cfg, "progress_teacher_curve_near_gate_ramp_m", 1.0)), 1e-6)
+            )
+            self._prev_progress_curve_score[env_ids] = (
+                curve_dist_score_reset * curve_yaw_score_reset * curve_gate_reset
+            ).detach()
+            self._prev_phi_traj[env_ids] = s_traj_reset[env_ids].detach()
 
         # 实验 3.2: 近场 commit 状态量初始化 (使用真实的叉尖距离)
         self._prev_dist_front[env_ids] = true_dist_front_reset.detach()

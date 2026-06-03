@@ -44,6 +44,7 @@ class VisionActorCritic(nn.Module):
         freeze_backbone: bool = False,
         freeze_backbone_updates: int = 0,
         imagenet_backbone_init: bool = False,
+        imagenet_input_normalization: bool | None = None,
         dual_camera: bool | None = None,
         squash_actor_mean: bool = False,
         actor_action_scale: float | list[float] | tuple[float, ...] | None = None,
@@ -66,6 +67,19 @@ class VisionActorCritic(nn.Module):
         self.dual_camera = bool(dual_camera) if dual_camera is not None else len(sample_images) == 2
         action_scale = self._make_action_scale(actor_action_scale, self.num_actions)
         self.register_buffer("actor_action_scale", action_scale.view(1, -1), persistent=False)
+        if imagenet_input_normalization is None:
+            imagenet_input_normalization = bool(imagenet_backbone_init)
+        self.imagenet_input_normalization = bool(imagenet_input_normalization)
+        self.register_buffer(
+            "image_normalization_mean",
+            torch.tensor([0.485, 0.456, 0.406], dtype=torch.float32).view(1, 3, 1, 1),
+            persistent=False,
+        )
+        self.register_buffer(
+            "image_normalization_std",
+            torch.tensor([0.229, 0.224, 0.225], dtype=torch.float32).view(1, 3, 1, 1),
+            persistent=False,
+        )
 
         proprio_dim = int(sample_proprio.shape[-1])
         critic_dim = int(sample_critic.shape[-1])
@@ -88,7 +102,8 @@ class VisionActorCritic(nn.Module):
             raise ValueError(f"Unknown backbone_type: {backbone_type}")
 
         with torch.no_grad():
-            image_feat_dim = int(self.image_encoder(sample_images[0][:1].detach().cpu()).shape[-1])
+            sample_image = self._preprocess_image_for_encoder(sample_images[0][:1].detach().cpu())
+            image_feat_dim = int(self.image_encoder(sample_image).shape[-1])
         fused_image_feat_dim = image_feat_dim * (2 if self.dual_camera else 1)
 
         self.image_proj = nn.Sequential(
@@ -135,6 +150,8 @@ class VisionActorCritic(nn.Module):
         print(f"Actor head: {self.actor}")
         if self.squash_actor_mean:
             print(f"Actor mean bounded with tanh and action scale={self.actor_action_scale.flatten().tolist()}")
+        if self.imagenet_input_normalization:
+            print("Vision image preprocessing: [0, 1] scaling + ImageNet mean/std normalization")
         print(f"Critic MLP: {self.critic}")
 
         if self.noise_std_type == "scalar":
@@ -190,10 +207,27 @@ class VisionActorCritic(nn.Module):
         if image.ndim != 4:
             raise ValueError(f"Expected image tensor with 4 dims, got shape={tuple(image.shape)}")
         if image.shape[1] == 3:
-            return image.float()
+            return image
         if image.shape[-1] == 3:
-            return image.permute(0, 3, 1, 2).float()
+            return image.permute(0, 3, 1, 2)
         raise ValueError(f"Unexpected image shape={tuple(image.shape)}")
+
+    def _scale_image_to_unit(self, image: torch.Tensor) -> torch.Tensor:
+        image = self._ensure_image_tensor(image)
+        if image.dtype == torch.uint8:
+            return image.float() / 255.0
+        image = image.float()
+        if image.max() > 1.0:
+            image = image / 255.0
+        return torch.clamp(image, 0.0, 1.0)
+
+    def _preprocess_image_for_encoder(self, image: torch.Tensor) -> torch.Tensor:
+        image = self._scale_image_to_unit(image)
+        if self.imagenet_input_normalization:
+            mean = self.image_normalization_mean.to(device=image.device, dtype=image.dtype)
+            std = self.image_normalization_std.to(device=image.device, dtype=image.dtype)
+            image = (image - mean) / std
+        return image
 
     def _extract_policy_terms(self, obs):
         if "image_left" in obs.keys() and "image_right" in obs.keys() and "proprio" in obs.keys():
@@ -222,10 +256,7 @@ class VisionActorCritic(nn.Module):
             raise ValueError("VisionActorCritic configured for single camera but observations contain two images")
         encoded_images = []
         for image in images:
-            image = self._ensure_image_tensor(image)
-            if image.max() > 1.0:
-                image = image / 255.0
-            image = torch.clamp(image, 0.0, 1.0)
+            image = self._preprocess_image_for_encoder(image)
             encoded_images.append(self.image_encoder(image))
 
         proprio = proprio.float()

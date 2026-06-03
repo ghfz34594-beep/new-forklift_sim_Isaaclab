@@ -552,6 +552,22 @@ gym.register(
 )
 
 gym.register(
+    id="Isaac-Forklift-PalletApproach-ToyotaGeoEdgeProgressTeacherV311LegacyAcceptedVisualCollect-v0",
+    entry_point=f"{__name__}.v311_legacy_teacher_env:ForkliftPalletInsertLiftEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": (
+            f"{__name__}.v311_legacy_teacher_env_cfg:"
+            "ForkliftPalletApproachToyotaGeoEdgeProgressTeacherV311LegacyAcceptedVisualCollectEnvCfg"
+        ),
+        "rsl_rl_cfg_entry_point": (
+            f"{agents.__name__}.v311_legacy_teacher_rsl_rl_ppo_cfg:"
+            "ForkliftToyotaGeoEdgeProgressTeacherV311LegacyExactFreezeActor450To2000PPORunnerCfg"
+        ),
+    },
+)
+
+gym.register(
     id="Isaac-Forklift-PalletApproach-V311LegacyAcceptedTeacherVisualFresh-v0",
     entry_point=f"{__name__}.v311_legacy_teacher_env:ForkliftPalletInsertLiftEnv",
     disable_env_checker=True,
@@ -643,6 +659,166 @@ gym.register(
         "rsl_rl_cfg_entry_point": (
             f"{agents.__name__}.v311_legacy_teacher_rsl_rl_ppo_cfg:"
             "ForkliftV311LegacyAcceptedTeacherVisualFreshSpeedPenaltyW5PPORunnerCfg"
+        ),
+    },
+)
+
+gym.register(
+    id="Isaac-Forklift-PalletApproach-V311LegacyAcceptedTeacherVisualFreshCurveRulerPreAlignW6-v0",
+    entry_point=f"{__name__}.v311_legacy_teacher_env:ForkliftPalletInsertLiftEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": (
+            f"{__name__}.v311_legacy_teacher_env_cfg:"
+            "ForkliftPalletApproachV311LegacyAcceptedTeacherVisualFreshCurveRulerPreAlignW6EnvCfg"
+        ),
+        "rsl_rl_cfg_entry_point": (
+            f"{agents.__name__}.v311_legacy_teacher_rsl_rl_ppo_cfg:"
+            "ForkliftV311LegacyAcceptedTeacherVisualFreshCurveRulerPreAlignW6PPORunnerCfg"
+        ),
+    },
+)
+
+gym.register(
+    id="Isaac-Forklift-PalletApproach-V311LegacyAcceptedTeacherVisualFreshCurveLookaheadPreAlignW18-v0",
+    entry_point=f"{__name__}.v311_legacy_teacher_env:ForkliftPalletInsertLiftEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": (
+            f"{__name__}.v311_legacy_teacher_env_cfg:"
+            "ForkliftPalletApproachV311LegacyAcceptedTeacherVisualFreshCurveLookaheadPreAlignW18EnvCfg"
+        ),
+        "rsl_rl_cfg_entry_point": (
+            f"{agents.__name__}.v311_legacy_teacher_rsl_rl_ppo_cfg:"
+            "ForkliftV311LegacyAcceptedTeacherVisualFreshCurveLookaheadPreAlignW18PPORunnerCfg"
+        ),
+    },
+)
+
+gym.register(
+    id="Isaac-Forklift-PalletApproach-V311LegacyAcceptedTeacherVisualFreshCurveCorridorPreAlignW18-v0",
+    entry_point=f"{__name__}.v311_legacy_teacher_env:ForkliftPalletInsertLiftEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": (
+            f"{__name__}.v311_legacy_teacher_env_cfg:"
+            "ForkliftPalletApproachV311LegacyAcceptedTeacherVisualFreshCurveCorridorPreAlignW18EnvCfg"
+        ),
+        "rsl_rl_cfg_entry_point": (
+            f"{agents.__name__}.v311_legacy_teacher_rsl_rl_ppo_cfg:"
+            "ForkliftV311LegacyAcceptedTeacherVisualFreshCurveCorridorPreAlignW18PPORunnerCfg"
+        ),
+    },
+)
+
+gym.register(
+    id="Isaac-Forklift-PalletApproach-V311LegacyAcceptedTeacherVisualFreshCurvePhaseGatePreAlignW18-v0",
+    entry_point=f"{__name__}.v311_legacy_teacher_env:ForkliftPalletInsertLiftEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": (
+            f"{__name__}.v311_legacy_teacher_env_cfg:"
+            "ForkliftPalletApproachV311LegacyAcceptedTeacherVisualFreshCurvePhaseGatePreAlignW18EnvCfg"
+        ),
+        "rsl_rl_cfg_entry_point": (
+            f"{agents.__name__}.v311_legacy_teacher_rsl_rl_ppo_cfg:"
+            "ForkliftV311LegacyAcceptedTeacherVisualFreshCurvePhaseGatePreAlignW18PPORunnerCfg"
+        ),
+    },
+)
+
+gym.register(
+    id="Isaac-Forklift-PalletApproach-V311LegacyAcceptedTeacherVisualFreshCurvePhaseGatePreAlignW18R1Floor0-v0",
+    entry_point=f"{__name__}.v311_legacy_teacher_env:ForkliftPalletInsertLiftEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": (
+            f"{__name__}.v311_legacy_teacher_env_cfg:"
+            "ForkliftPalletApproachV311LegacyAcceptedTeacherVisualFreshCurvePhaseGatePreAlignW18R1Floor0EnvCfg"
+        ),
+        "rsl_rl_cfg_entry_point": (
+            f"{agents.__name__}.v311_legacy_teacher_rsl_rl_ppo_cfg:"
+            "ForkliftV311LegacyAcceptedTeacherVisualFreshCurvePhaseGatePreAlignW18R1Floor0PPORunnerCfg"
+        ),
+    },
+)
+
+gym.register(
+    id="Isaac-Forklift-PalletApproach-V311LegacyAcceptedTeacherVisualFreshCurvePhaseGatePreAlignW18R1Soft-v0",
+    entry_point=f"{__name__}.v311_legacy_teacher_env:ForkliftPalletInsertLiftEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": (
+            f"{__name__}.v311_legacy_teacher_env_cfg:"
+            "ForkliftPalletApproachV311LegacyAcceptedTeacherVisualFreshCurvePhaseGatePreAlignW18R1SoftEnvCfg"
+        ),
+        "rsl_rl_cfg_entry_point": (
+            f"{agents.__name__}.v311_legacy_teacher_rsl_rl_ppo_cfg:"
+            "ForkliftV311LegacyAcceptedTeacherVisualFreshCurvePhaseGatePreAlignW18R1SoftPPORunnerCfg"
+        ),
+    },
+)
+
+gym.register(
+    id="Isaac-Forklift-PalletApproach-V311LegacyAcceptedTeacherVisualFreshCurvePhaseLatchPreAlignV5-v0",
+    entry_point=f"{__name__}.v311_legacy_teacher_env:ForkliftPalletInsertLiftEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": (
+            f"{__name__}.v311_legacy_teacher_env_cfg:"
+            "ForkliftPalletApproachV311LegacyAcceptedTeacherVisualFreshCurvePhaseLatchPreAlignV5EnvCfg"
+        ),
+        "rsl_rl_cfg_entry_point": (
+            f"{agents.__name__}.v311_legacy_teacher_rsl_rl_ppo_cfg:"
+            "ForkliftV311LegacyAcceptedTeacherVisualFreshCurvePhaseLatchPreAlignV5PPORunnerCfg"
+        ),
+    },
+)
+
+gym.register(
+    id="Isaac-Forklift-PalletApproach-V311LegacyAcceptedTeacherVisualFreshCurvePhaseLatchPreAlignV5BDualGate-v0",
+    entry_point=f"{__name__}.v311_legacy_teacher_env:ForkliftPalletInsertLiftEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": (
+            f"{__name__}.v311_legacy_teacher_env_cfg:"
+            "ForkliftPalletApproachV311LegacyAcceptedTeacherVisualFreshCurvePhaseLatchPreAlignV5BDualGateEnvCfg"
+        ),
+        "rsl_rl_cfg_entry_point": (
+            f"{agents.__name__}.v311_legacy_teacher_rsl_rl_ppo_cfg:"
+            "ForkliftV311LegacyAcceptedTeacherVisualFreshCurvePhaseLatchPreAlignV5BDualGatePPORunnerCfg"
+        ),
+    },
+)
+
+gym.register(
+    id="Isaac-Forklift-PalletApproach-V311LegacyAcceptedTeacherVisualFreshCurvePhaseLatchPreAlignV6ReleaseGate-v0",
+    entry_point=f"{__name__}.v311_legacy_teacher_env:ForkliftPalletInsertLiftEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": (
+            f"{__name__}.v311_legacy_teacher_env_cfg:"
+            "ForkliftPalletApproachV311LegacyAcceptedTeacherVisualFreshCurvePhaseLatchPreAlignV6ReleaseGateEnvCfg"
+        ),
+        "rsl_rl_cfg_entry_point": (
+            f"{agents.__name__}.v311_legacy_teacher_rsl_rl_ppo_cfg:"
+            "ForkliftV311LegacyAcceptedTeacherVisualFreshCurvePhaseLatchPreAlignV6ReleaseGatePPORunnerCfg"
+        ),
+    },
+)
+
+gym.register(
+    id="Isaac-Forklift-PalletApproach-V311LegacyAcceptedTeacherVisualFreshActionGuidanceW01-v0",
+    entry_point=f"{__name__}.v311_legacy_teacher_env:ForkliftPalletInsertLiftEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": (
+            f"{__name__}.v311_legacy_teacher_env_cfg:"
+            "ForkliftPalletApproachV311LegacyAcceptedTeacherVisualFreshActionGuidanceW01EnvCfg"
+        ),
+        "rsl_rl_cfg_entry_point": (
+            f"{agents.__name__}.v311_legacy_teacher_rsl_rl_ppo_cfg:"
+            "ForkliftV311LegacyAcceptedTeacherVisualFreshActionGuidanceW01PPORunnerCfg"
         ),
     },
 )

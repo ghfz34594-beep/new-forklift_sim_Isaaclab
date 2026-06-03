@@ -19,6 +19,7 @@ class ForkliftVisionActorCriticCfg(RslRlPpoActorCriticCfg):
     freeze_backbone: bool = False
     freeze_backbone_updates: int = 0
     imagenet_backbone_init: bool = True
+    imagenet_input_normalization: bool | None = None
     backbone_type: str = "mobilenet_v3_small"
     dual_camera: bool = False
     squash_actor_mean: bool = False
