@@ -2,6 +2,21 @@
 
 ---
 
+# Forklift Project Entry Point
+
+This fork contains a forklift pallet insertion and lifting project built on Isaac Lab.
+
+Start here for the project-specific code, assets, scripts, and notes:
+
+- [FORKLIFT_PROJECT_README.md](FORKLIFT_PROJECT_README.md)
+- `source/isaaclab_tasks/isaaclab_tasks/direct/forklift_pallet_insert_lift/`
+- `assets/`
+- `forklift_project/`
+
+The rest of this README is the upstream Isaac Lab overview.
+
+---
+
 # Isaac Lab
 
 [![IsaacSim](https://img.shields.io/badge/IsaacSim-5.1.0-silver.svg)](https://docs.isaacsim.omniverse.nvidia.com/latest/index.html)

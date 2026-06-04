@@ -19,6 +19,35 @@ from isaaclab.sim.spawners.from_files import GroundPlaneCfg
 from isaaclab.utils.assets import ISAAC_NUCLEUS_DIR
 
 
+def _find_repo_root() -> str | None:
+    """Resolve the shared project root from either source tree layout."""
+    here = os.path.abspath(os.path.dirname(__file__))
+    for levels_up in (6, 7):
+        root = os.path.abspath(os.path.join(here, *([".."] * levels_up)))
+        if os.path.isfile(os.path.join(root, "assets", "forklift_c.usd")):
+            return root
+    return None
+
+
+def _prefer_local_usd(local_name: str, remote_path: str) -> str:
+    """Use a checked-in local USD when available, otherwise fall back to Nucleus."""
+    repo_root = _find_repo_root()
+    if repo_root is None:
+        return remote_path
+    local_path = os.path.join(repo_root, "assets", local_name)
+    return local_path if os.path.isfile(local_path) else remote_path
+
+
+_DEFAULT_FORKLIFT_USD_PATH = _prefer_local_usd(
+    "forklift_c.usd",
+    f"{ISAAC_NUCLEUS_DIR}/Robots/IsaacSim/ForkliftC/forklift_c.usd",
+)
+_DEFAULT_PALLET_USD_PATH = _prefer_local_usd(
+    "pallet_com_shifted.usd",
+    f"{ISAAC_NUCLEUS_DIR}/Props/Pallet/pallet.usd",
+)
+
+
 @configclass
 class ForkliftPalletInsertLiftEnvCfg(DirectRLEnvCfg):
     """Configuration for the Forklift Pallet Insert+Lift environment (direct workflow).
@@ -67,8 +96,8 @@ class ForkliftPalletInsertLiftEnvCfg(DirectRLEnvCfg):
     )
 
     # ===== 资产路径 =====
-    forklift_usd_path: str = f"{ISAAC_NUCLEUS_DIR}/Robots/IsaacSim/ForkliftC/forklift_c.usd"
-    pallet_usd_path: str = f"{ISAAC_NUCLEUS_DIR}/Props/Pallet/pallet.usd"
+    forklift_usd_path: str = _DEFAULT_FORKLIFT_USD_PATH
+    pallet_usd_path: str = _DEFAULT_PALLET_USD_PATH
 
     # ===== 托盘几何参数（欧标托盘，按 1.8x 缩放）=====
     # 原始深度 1.2m × 1.8 = 2.16m（参考 docs/learning_guiding/isaac_sim_asset_import.md）
@@ -289,7 +318,7 @@ class ForkliftPalletInsertLiftEnvCfg(DirectRLEnvCfg):
     robot_cfg: ArticulationCfg = ArticulationCfg(
         prim_path="/World/envs/env_.*/Robot",
         spawn=sim_utils.UsdFileCfg(
-            usd_path=f"{ISAAC_NUCLEUS_DIR}/Robots/IsaacSim/ForkliftC/forklift_c.usd",
+            usd_path=_DEFAULT_FORKLIFT_USD_PATH,
             rigid_props=sim_utils.RigidBodyPropertiesCfg(
                 rigid_body_enabled=True,
                 max_linear_velocity=20.0,
@@ -374,7 +403,7 @@ class ForkliftPalletInsertLiftEnvCfg(DirectRLEnvCfg):
     pallet_cfg: RigidObjectCfg = RigidObjectCfg(
         prim_path="/World/envs/env_.*/Pallet",
         spawn=sim_utils.UsdFileCfg(
-            usd_path=f"{os.environ.get('ISAACLAB_PATH', '/data/jianshi/projects/forklift_sim/IsaacLab')}/../assets/pallet_com_shifted.usd",
+            usd_path=_DEFAULT_PALLET_USD_PATH,
             scale=(1.8, 1.8, 1.8),  # 托盘统一缩放（修改后需同步更新相关几何参数）
             rigid_props=sim_utils.RigidBodyPropertiesCfg(
                 rigid_body_enabled=True,

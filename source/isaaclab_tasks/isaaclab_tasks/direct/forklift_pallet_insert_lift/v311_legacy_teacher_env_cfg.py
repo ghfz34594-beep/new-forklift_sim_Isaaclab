@@ -43,6 +43,10 @@ _DEFAULT_FORKLIFT_USD_PATH = _prefer_local_usd(
     "forklift_c.usd",
     f"{ISAAC_NUCLEUS_DIR}/Robots/IsaacSim/ForkliftC/forklift_c.usd",
 )
+_DEFAULT_PALLET_USD_PATH = _prefer_local_usd(
+    "pallet_com_shifted.usd",
+    f"{ISAAC_NUCLEUS_DIR}/Props/Pallet/pallet.usd",
+)
 
 
 @configclass
@@ -255,7 +259,7 @@ class ForkliftPalletInsertLiftEnvCfg(DirectRLEnvCfg):
 
     # ===== 资产路径 =====
     forklift_usd_path: str = _DEFAULT_FORKLIFT_USD_PATH
-    pallet_usd_path: str = f"{ISAAC_NUCLEUS_DIR}/Props/Pallet/pallet.usd"
+    pallet_usd_path: str = _DEFAULT_PALLET_USD_PATH
 
     # ===== 托盘几何参数（欧标托盘，按 1.8x 缩放）=====
     # 原始深度 1.2m × 1.8 = 2.16m（参考 docs/learning_guiding/isaac_sim_asset_import.md）
@@ -929,7 +933,7 @@ class ForkliftPalletInsertLiftEnvCfg(DirectRLEnvCfg):
     pallet_cfg: RigidObjectCfg = RigidObjectCfg(
         prim_path="/World/envs/env_.*/Pallet",
         spawn=sim_utils.UsdFileCfg(
-            usd_path=f"{os.environ.get('ISAACLAB_PATH', '/home/uniubi/projects/forklift_sim/IsaacLab')}/../assets/pallet_com_shifted.usd",
+            usd_path=_DEFAULT_PALLET_USD_PATH,
             scale=(1.8, 1.8, 1.8),  # 托盘统一缩放（修改后需同步更新相关几何参数）
             rigid_props=sim_utils.RigidBodyPropertiesCfg(
                 rigid_body_enabled=True,

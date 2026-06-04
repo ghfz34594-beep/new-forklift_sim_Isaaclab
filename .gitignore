@@ -8,11 +8,16 @@
 **/*.dmp
 **/.thumbs
 
-# No USD files allowed in the repo
+# No USD files allowed in the repo, except the forklift project assets.
 **/*.usd
 **/*.usda
 **/*.usdc
 **/*.usdz
+!assets/
+!assets/*.usd
+!assets/*.usda
+!assets/*.usdc
+!assets/*.usdz
 
 # Python
 .DS_Store
@@ -66,6 +71,8 @@ _build
 
 # Tests
 tests/
+!forklift_project/**/tests/
+!forklift_project/**/tests/**
 
 # Docker history
 .isaac-lab-docker-history
