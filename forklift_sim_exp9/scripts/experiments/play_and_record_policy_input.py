@@ -1,0 +1,9 @@
+#!/usr/bin/env python3
+from pathlib import Path
+import runpy
+
+
+runpy.run_path(
+    str(Path(__file__).resolve().parents[1] / "validation" / "playback" / "play_and_record_policy_input.py"),
+    run_name="__main__",
+)

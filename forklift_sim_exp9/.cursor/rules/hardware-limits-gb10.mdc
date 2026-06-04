@@ -1,0 +1,14 @@
+---
+description: Hardware limits and NUM_ENVS configuration for IsaacLab on GB10
+globs: ["*.sh", "*.py", "*cfg*.py"]
+---
+# 硬件限制与环境数量配置 (GB10 128GB 统一内存)
+
+## 背景 (Context)
+在 NVIDIA IGX Orin / GB10 (Grace Blackwell) 架构且拥有 128GB 统一内存 (Unified Memory) 的机器上，运行带有相机渲染（例如 256x256 分辨率）的 IsaacLab 强化学习训练时，内存消耗极大。
+
+## 规则 (Rules)
+
+- **禁止 (DO NOT)** 将 `NUM_ENVS` 设置为 `256`、`512` 或 `1024`（在 256x256 相机分辨率下）。这会导致内存占用持续攀升（存在内存泄漏或缓存积累），并在运行一段时间后触发系统 OOM (Out of Memory) killer，直接杀死训练进程。
+- **推荐 (DO)** 将 `NUM_ENVS=128` 作为 256x256 相机渲染下的**绝对安全上限**。虽然起初 256 看似安全，但长期运行仍会 OOM。128 环境已被证明可以稳定运行过夜（超过 12 小时）。
+- 如果必须使用更大的 `NUM_ENVS`（如 1024），则**必须**大幅降低相机分辨率（例如降至 128x128 或 64x64），或者完全关闭相机渲染 (`env.use_camera=False`)。

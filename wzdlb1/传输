@@ -1,0 +1,276 @@
+[1.332s] [ext: omni.kit.manipulator.prim-107.0.0] startup
+[1.332s] [ext: omni.physics.tensors-107.3.26] startup
+[1.335s] [ext: omni.kit.property.adapter.core-1.0.2] startup
+[1.336s] [ext: omni.kit.widget.highlight_label-1.0.3] startup
+[1.336s] [ext: omni.kit.widget.searchfield-1.1.8] startup
+[1.337s] [ext: omni.kit.property.adapter.fabric-1.0.3] startup
+[1.337s] [ext: omni.kit.widget.filter-1.1.4] startup
+[1.338s] [ext: omni.kit.widget.prompt-1.0.7] startup
+[1.338s] [ext: omni.kit.window.property-1.12.1] startup
+[1.339s] [ext: omni.kit.property.adapter.usd-1.0.2] startup
+[1.340s] [ext: omni.kit.hotkeys.core-1.3.10] startup
+[1.341s] [ext: omni.kit.window.file_exporter-1.0.33] startup
+[1.342s] [ext: omni.kit.stage_template.core-1.1.22] startup
+[1.342s] [ext: omni.kit.viewport.menubar.core-107.2.1] startup
+[1.350s] [ext: omni.kit.viewport.actions-107.0.2] startup
+[1.352s] [ext: omni.kit.window.file-2.0.5] startup
+[1.354s] [ext: omni.kit.window.content_browser_registry-0.0.6] startup
+[1.354s] [ext: omni.kit.viewport.menubar.display-107.0.3] startup
+[1.355s] [ext: omni.kit.window.content_browser-3.1.3] startup
+[1.361s] [ext: omni.kit.widget.stage-3.1.4] startup
+[1.368s] [ext: omni.inspect-1.0.2] startup
+[1.369s] [ext: omni.kit.widget.layers-1.8.6] startup
+[1.375s] [ext: omni.kit.property.usd-4.5.12] startup
+[1.381s] [ext: omni.kit.numpy.common-0.1.3] startup
+[1.382s] [ext: omni.physics-107.3.26] startup
+[1.384s] [ext: omni.graph.core-2.184.5] startup
+[1.385s] [ext: omni.usdphysics.ui-107.3.26] startup
+[1.401s] [ext: omni.physics.stageupdate-107.3.26] startup
+[1.402s] [ext: isaacsim.core.deprecation_manager-0.2.7] startup
+[1.403s] [ext: omni.physx.ui-107.3.26] startup
+[1.421s] [ext: isaacsim.core.version-2.0.6] startup
+[1.422s] [ext: omni.usd.metrics.assembler-107.3.1] startup
+[1.425s] [ext: omni.warp.core-1.8.2] startup
+[1.536s] [ext: omni.ui_query-1.1.8] startup
+[1.536s] [ext: omni.physics.physx-107.3.26] startup
+2026-02-04T08:37:50Z [1,524ms] [Warning] [carb] Acquiring non optional plugin interface which is not listed as dependency: [omni::physx::IPhysxBenchmarks v1.0] (plugin: <default plugin>), by client: omni.physics.physx.plugin. Add it to CARB_PLUGIN_IMPL_DEPS() macro of a client.
+[1.538s] [ext: isaacsim.storage.native-1.5.1] startup
+[1.538s] [ext: omni.usd.metrics.assembler.physics-107.3.26] startup
+[1.539s] [ext: omni.isaac.dynamic_control-2.0.7] startup
+2026-02-04T08:37:50Z [1,529ms] [Warning] [omni.isaac.dynamic_control] omni.isaac.dynamic_control is deprecated as of Isaac Sim 4.5. No action is needed from end-users.
+[1.543s] [ext: omni.graph.tools-1.79.2] startup
+[1.555s] [ext: omni.physx.tensors-107.3.26] startup
+[1.558s] [ext: isaacsim.core.utils-3.5.1] startup
+[1.559s] [ext: omni.graph-1.141.2] startup
+[1.583s] [ext: isaacsim.core.simulation_manager-1.4.4] startup
+[2.755s] [ext: omni.graph.action_core-1.1.7] startup
+[2.757s] [ext: omni.kit.stage_templates-2.0.0] startup
+[2.759s] [ext: isaacsim.core.prims-0.6.1] startup
+[2.773s] [ext: omni.graph.action_nodes-1.50.4] startup
+[2.775s] [ext: isaacsim.core.api-4.8.0] startup
+[2.787s] [ext: omni.graph.action-1.130.0] startup
+[2.787s] [ext: omni.kit.widget.stage_icons-1.0.8] startup
+[2.789s] [ext: omni.kit.selection-0.1.6] startup
+[2.790s] [ext: omni.kit.window.stage-2.6.1] startup
+[2.793s] [ext: omni.kit.menu.create-2.0.1] startup
+[2.795s] [ext: omni.kit.widget.text_editor-1.1.1] startup
+[2.796s] [ext: omni.kit.ui_test-1.3.7] startup
+[2.798s] [ext: omni.kit.scripting-107.3.2] startup
+[2.802s] [ext: omni.kit.window.extensions-1.4.27] startup
+[2.806s] [ext: omni.graph.visualization.nodes-2.1.3] startup
+[2.814s] [ext: isaacsim.replicator.behavior-1.1.16] startup
+[2.817s] [ext: isaacsim.gui.components-1.2.1] startup
+[2.827s] [ext: isaacsim.gui.menu-2.4.4] startup
+[2.840s] [ext: isaacsim.core.cloner-1.4.10] startup
+[2.843s] [ext: semantics.schema.editor-2.0.2] startup
+2026-02-04T08:37:52Z [2,835ms] [Warning] [pxr.Semantics] pxr.Semantics is deprecated - please use Semantics instead
+[2.850s] [ext: omni.kit.widget.zoombar-1.0.6] startup
+[2.851s] [ext: omni.kit.usd.collect-2.4.5] startup
+[2.853s] [ext: omni.kit.browser.core-2.3.13] startup
+[2.855s] [ext: omni.kit.menu.stage-1.2.7] startup
+[2.856s] [ext: omni.kit.tool.collect-2.2.18] startup
+[2.858s] [ext: omni.kit.browser.folder.core-1.10.9] startup
+[2.861s] [ext: isaacsim.core.experimental.utils-0.3.0] startup
+[2.862s] [ext: isaacsim.asset.browser-1.3.23] startup
+[2.900s] [ext: omni.kit.widget.graph-2.0.0] startup
+[2.904s] [ext: omni.graph.image.core-0.6.1] startup
+[2.905s] [ext: omni.kit.graph.delegate.default-1.2.3] startup
+[2.905s] [ext: omni.graph.image.nodes-1.3.1] startup
+[2.906s] [ext: omni.kit.graph.editor.core-1.5.3] startup
+[2.907s] [ext: omni.graph.nodes-1.170.10] startup
+[2.913s] [ext: omni.graph.ui_nodes-1.50.5] startup
+[2.915s] [ext: omni.kit.graph.usd.commands-1.3.1] startup
+[2.915s] [ext: omni.kit.widget.material_preview-1.0.16] startup
+[2.918s] [ext: omni.videoencoding-0.1.2] startup
+[2.919s] [ext: omni.kit.stagerecorder.core-107.0.3] startup
+[2.922s] [ext: omni.warp-1.8.2] startup
+[2.925s] [ext: omni.syntheticdata-0.6.13] startup
+[2.943s] [ext: omni.kit.window.material_graph-1.9.1] startup
+[2.963s] [ext: omni.graph.scriptnode-1.50.0] startup
+[2.971s] [ext: omni.kit.stagerecorder.ui-107.0.1] startup
+[2.983s] [ext: omni.replicator.core-1.12.27] startup
+2026-02-04T08:37:52Z [3,057ms] [Warning] [omni.graph.core.plugin] Found duplicate of category 'Replicator' - was 'Annotators', adding 'Fabric Reader'
+2026-02-04T08:37:52Z [3,057ms] [Warning] [omni.graph.core.plugin] Category 'Replicator' not accepted on node type 'omni.replicator.core.FabricReader' in extension 'omni.replicator.core'
+2026-02-04T08:37:52Z [3,057ms] [Warning] [omni.replicator.core.scripts.extension] No material configuration file, adding configuration to material settings directly.
+[3.073s] [ext: omni.kit.stagerecorder.bundle-105.0.2] startup
+[3.074s] [ext: isaacsim.core.nodes-3.4.3] startup
+[3.080s] [ext: isaacsim.test.docstring-1.1.0] startup
+[3.085s] [ext: isaacsim.sensors.camera-1.3.6] startup
+[3.093s] [ext: isaacsim.core.experimental.prims-0.8.1] startup
+[3.123s] [ext: omni.kit.usdz_export-1.0.9] startup
+[3.127s] [ext: isaacsim.robot.surface_gripper-3.3.1] startup
+[3.131s] [ext: isaacsim.sensors.physics-0.4.3] startup
+[3.137s] [ext: omni.kit.tool.asset_importer-4.3.2] startup
+[3.147s] [ext: isaacsim.robot.manipulators-3.3.6] startup
+[3.153s] [ext: isaacsim.robot.policy.examples-4.1.11] startup
+[3.159s] [ext: omni.sensors.nv.common-3.0.0] startup
+[3.174s] [ext: isaacsim.asset.importer.mjcf-2.5.13] startup
+[3.251s] [ext: isaacsim.util.debug_draw-3.1.0] startup
+[3.273s] [ext: omni.sensors.nv.materials-2.0.0] startup
+[3.304s] [ext: omni.sensors.net-1.0.0] startup
+[3.311s] [ext: isaacsim.sensors.physx-2.3.2] startup
+[3.340s] [ext: isaacsim.examples.browser-0.2.1] startup
+[3.394s] [ext: isaacsim.asset.importer.urdf-2.4.31] startup
+[3.519s] [ext: isaacsim.simulation_app-2.12.2] startup
+[3.521s] [ext: omni.sensors.nv.ids-2.0.0] startup
+[3.523s] [ext: omni.sensors.nv.lidar-3.0.0] startup
+[3.529s] [ext: omni.kit.property.audio-1.0.16] startup
+[3.533s] [ext: omni.kit.property.camera-1.0.10] startup
+[3.536s] [ext: omni.kit.property.geometry-2.0.4] startup
+[3.543s] [ext: omni.hydra.scene_api-0.1.2] startup
+[3.547s] [ext: omni.sensors.nv.wpm-3.0.0] startup
+[3.559s] [ext: omni.kit.property.light-1.0.12] startup
+[3.565s] [ext: omni.kit.property.material-1.11.9] startup
+[3.569s] [ext: omni.kit.property.render-1.2.1] startup
+[3.570s] [ext: omni.kit.property.transform-1.5.13] startup
+[3.573s] [ext: omni.sensors.nv.radar-3.0.0] startup
+[3.575s] [ext: omni.anim.curve.core-1.3.1] startup
+[3.582s] [ext: omni.kit.manipulator.camera-106.0.4] startup
+[3.585s] [ext: isaacsim.gui.property-1.1.3] startup
+[3.586s] [ext: omni.kit.property.bundle-1.4.1] startup
+[3.588s] [ext: isaacsim.sensors.rtx-15.8.4] startup
+[3.592s] [ext: omni.kit.viewport.menubar.camera-107.0.6] startup
+[3.598s] [ext: omni.kit.viewport.menubar.lighting-107.3.1] startup
+[3.604s] [ext: omni.kit.viewport.menubar.render-107.0.10] startup
+[3.606s] [ext: omni.kit.viewport.menubar.settings-107.0.3] startup
+[3.608s] [ext: omni.kit.window.script_editor-2.0.1] startup
+[3.610s] [ext: omni.kit.window.console-1.1.4] startup
+[3.612s] [ext: isaacsim.robot.wheeled_robots-4.0.24] startup
+[3.616s] [ext: omni.physx.demos-107.3.26] startup
+[3.638s] [ext: omni.kit.property.physx-107.3.26] startup
+[3.651s] [ext: omni.rtx.window.settings-0.6.19] startup
+[3.655s] [ext: omni.ocio-0.1.1] startup
+[3.657s] [ext: omni.asset_validator.core-1.1.6] startup
+[3.684s] [ext: omni.physx.vehicle-107.3.26] startup
+[3.694s] [ext: omni.replicator.replicator_yaml-2.0.11] startup
+[3.704s] [ext: omni.rtx.settings.core-0.6.5] startup
+[3.708s] [ext: omni.kit.window.toolbar-2.0.0] startup
+[3.710s] [ext: omni.kit.window.status_bar-0.1.9] startup
+[3.713s] [ext: omni.physx.asset_validator-107.3.26] startup
+[3.717s] [ext: omni.physx.camera-107.3.26] startup
+[3.723s] [ext: omni.physx.cct-107.3.26] startup
+[3.730s] [ext: omni.physx.graph-107.3.26] startup
+[3.741s] [ext: omni.physx.supportui-107.3.26] startup
+[3.750s] [ext: omni.physx.telemetry-107.3.26] startup
+[3.752s] [ext: omni.usd.metrics.assembler.ui-107.3.1] startup
+[3.760s] [ext: isaacsim.app.about-2.0.11] startup
+[3.762s] [ext: isaacsim.core.throttling-2.2.2] startup
+[3.763s] [ext: omni.kit.ui.actions-1.0.5] startup
+[3.765s] [ext: semantics.schema.property-2.0.1] startup
+[3.766s] [ext: omni.physx.bundle-107.3.26] startup
+[3.767s] [ext: isaaclab-0.48.0] startup
+[3.876s] [ext: isaaclab_assets-0.2.3] startup
+[4.020s] [ext: isaaclab_tasks-0.11.6] startup
+[4.936s] [ext: omni.kit.menu.common-2.0.1] startup
+[4.937s] [ext: isaaclab_rl-0.4.4] startup
+[4.938s] [ext: isaaclab_mimic-1.0.15] startup
+[4.938s] [ext: isaaclab.python-2.3.1] startup
+[4.940s] Simulation App Starting
+2026-02-04T08:37:54Z [5,130ms] [Warning] [omni.fabric.plugin] Warning: attribute viewportHandle not found for bucket id 9
+
+[5.215s] app ready
+[7.214s] Simulation App Startup Complete
+Gym has been unmaintained since 2022 and does not support NumPy 2.0 amongst other critical functionality.
+Please upgrade to Gymnasium, the maintained drop-in replacement of Gym, or contact the authors of your software and request that they upgrade.
+Users of this version of Gym should be able to simply replace 'import gym' with 'import gymnasium as gym' in the vast majority of cases.
+See the migration guide at https://gymnasium.farama.org/introduction/migration_guide/ for additional information.
+[INFO]: Parsing configuration from: isaaclab_tasks.direct.rotary_double_pendulum.rotary_double_pendulum_cfg:RotaryDoublePendulumEnvCfg
+[INFO]: Parsing configuration from: /home/uniubi/projects/forklift_sim/IsaacLab/source/isaaclab_tasks/isaaclab_tasks/direct/rotary_double_pendulum/agents/rl_games_ppo_cfg.yaml
+[INFO] Loading experiment from directory: /home/uniubi/projects/forklift_sim/IsaacLab/logs/rl_games/rotary_double_pendulum_direct
+Setting seed: 42
+[7.872s] [ext: omni.physx.fabric-107.3.26] startup
+[2026-02-04 17:37:57,173][ogn_registration][INFO] - Looking for Python nodes to register in omni.physx.fabric-107.3.26
+[2026-02-04 17:37:57,173][ogn_registration][INFO] -  -> Registered nodes from module omni.physxfabric at /home/uniubi/miniconda3/envs/env_isaaclab/lib/python3.11/site-packages/isaacsim/extscache/omni.physx.fabric-107.3.26+107.3.3.lx64.r.cp311.u353
+[2026-02-04 17:37:57,173][ogn_registration][INFO] - Registering nodes in /home/uniubi/miniconda3/envs/env_isaaclab/lib/python3.11/site-packages/isaacsim/extscache/omni.physx.fabric-107.3.26+107.3.3.lx64.r.cp311.u353 imported as omni.physxfabric with AutoNode config {}
+[2026-02-04 17:37:57,173][ogn_registration][INFO] - Registering Python Node Types from omni.physxfabric at /home/uniubi/miniconda3/envs/env_isaaclab/lib/python3.11/site-packages/isaacsim/extscache/omni.physx.fabric-107.3.26+107.3.3.lx64.r.cp311.u353 in omni.physx.fabric
+[2026-02-04 17:37:57,173][ogn_registration][INFO] - ========================================================================================================================
+[2026-02-04 17:37:57,173][ogn_registration][INFO] - No dependency on omni.graph, therefore no nodes to register in omni.physx.fabric
+[2026-02-04 17:37:57,173][ogn_registration][INFO] - ...None found, no registration to do
+[2026-02-04 17:37:57,173][ogn_registration][INFO] - ...Skipping: No OmniGraph presence in the module omni.physxfabric - No nodes in this module, do not remember it
+[2026-02-04 17:37:57,174][ogn_registration][INFO] - Destroying registration record for omni.physx.fabric
+[2026-02-04 17:37:57,174][ogn_registration][INFO] - OGN register omni.physx.fabric-107.3.26 took 828785.000000
+[INFO]: Base environment:
+	Environment device    : cuda:0
+	Environment seed      : 42
+	Physics step-size     : 0.004166666666666667
+	Rendering step-size   : 0.008333333333333333
+	Environment step-size : 0.008333333333333333
+2026-02-04T08:37:57Z [7,966ms] [Warning] [omni.usd] Warning: in _ReportErrors at line 3172 of /builds/omniverse/usd-ci/USD/pxr/usd/usd/stage.cpp -- In </acrobot/base_link/visuals>: Unresolved reference prim path @/tmp/IsaacLab/usd_20260204_173757_1824/configuration/rotary_double_pendulum_physics.usd@</visuals/base_link> introduced by @/tmp/IsaacLab/usd_20260204_173757_1824/configuration/rotary_double_pendulum_base.usd@</acrobot/base_link/visuals> (recomposing stage on stage @/tmp/IsaacLab/usd_20260204_173757_1824/configuration/rotary_double_pendulum_physics.usd@ <0x65d8a0b0>)
+
+2026-02-04T08:37:57Z [7,966ms] [Warning] [omni.usd] Warning: in _ReportErrors at line 3172 of /builds/omniverse/usd-ci/USD/pxr/usd/usd/stage.cpp -- In </acrobot/base_link/visuals>: Unresolved reference prim path @/tmp/IsaacLab/usd_20260204_173757_1824/rotary_double_pendulum.usd@</visuals/base_link> introduced by @/tmp/IsaacLab/usd_20260204_173757_1824/configuration/rotary_double_pendulum_base.usd@</acrobot/base_link/visuals> (recomposing stage on stage @/tmp/IsaacLab/usd_20260204_173757_1824/rotary_double_pendulum.usd@ <0x65d77e40>)
+
+2026-02-04T08:37:57Z [7,966ms] [Warning] [omni.usd] Warning: in _ReportErrors at line 3172 of /builds/omniverse/usd-ci/USD/pxr/usd/usd/stage.cpp -- In </acrobot/base_link/visuals>: Unresolved reference prim path @/tmp/IsaacLab/usd_20260204_173757_1824/rotary_double_pendulum.usd@</visuals/base_link> introduced by @/tmp/IsaacLab/usd_20260204_173757_1824/configuration/rotary_double_pendulum_base.usd@</acrobot/base_link/visuals> (recomposing stage on stage @/tmp/IsaacLab/usd_20260204_173757_1824/rotary_double_pendulum.usd@ <0x65d73ee0>)
+
+2026-02-04T08:37:57Z [7,966ms] [Warning] [omni.usd] Warning: in _ReportErrors at line 3172 of /builds/omniverse/usd-ci/USD/pxr/usd/usd/stage.cpp -- In </acrobot/base_link/visuals>: Unresolved reference prim path @/tmp/IsaacLab/usd_20260204_173757_1824/configuration/rotary_double_pendulum_base.usd@</visuals/base_link> introduced by @/tmp/IsaacLab/usd_20260204_173757_1824/configuration/rotary_double_pendulum_base.usd@</acrobot/base_link/visuals> (recomposing stage on stage @/tmp/IsaacLab/usd_20260204_173757_1824/configuration/rotary_double_pendulum_base.usd@ <0x65d92e50>)
+
+2026-02-04T08:37:57Z [7,966ms] [Warning] [omni.usd] Warning: in _ReportErrors at line 3172 of /builds/omniverse/usd-ci/USD/pxr/usd/usd/stage.cpp -- In </acrobot/base_link/visuals>: Unresolved reference prim path @/tmp/IsaacLab/usd_20260204_173757_1824/configuration/rotary_double_pendulum_physics.usd@</visuals/base_link> introduced by @/tmp/IsaacLab/usd_20260204_173757_1824/configuration/rotary_double_pendulum_base.usd@</acrobot/base_link/visuals> (recomposing stage on stage @/tmp/IsaacLab/usd_20260204_173757_1824/configuration/rotary_double_pendulum_physics.usd@ <0x65d8a0b0>)
+
+2026-02-04T08:37:57Z [7,966ms] [Warning] [omni.usd] Warning: in _ReportErrors at line 3172 of /builds/omniverse/usd-ci/USD/pxr/usd/usd/stage.cpp -- In </acrobot/base_link/visuals>: Unresolved reference prim path @/tmp/IsaacLab/usd_20260204_173757_1824/rotary_double_pendulum.usd@</visuals/base_link> introduced by @/tmp/IsaacLab/usd_20260204_173757_1824/configuration/rotary_double_pendulum_base.usd@</acrobot/base_link/visuals> (recomposing stage on stage @/tmp/IsaacLab/usd_20260204_173757_1824/rotary_double_pendulum.usd@ <0x65d77e40>)
+
+2026-02-04T08:37:57Z [7,966ms] [Warning] [omni.usd] Warning: in _ReportErrors at line 3172 of /builds/omniverse/usd-ci/USD/pxr/usd/usd/stage.cpp -- In </acrobot/base_link/visuals>: Unresolved reference prim path @/tmp/IsaacLab/usd_20260204_173757_1824/rotary_double_pendulum.usd@</visuals/base_link> introduced by @/tmp/IsaacLab/usd_20260204_173757_1824/configuration/rotary_double_pendulum_base.usd@</acrobot/base_link/visuals> (recomposing stage on stage @/tmp/IsaacLab/usd_20260204_173757_1824/rotary_double_pendulum.usd@ <0x65d73ee0>)
+
+2026-02-04T08:37:57Z [7,966ms] [Warning] [omni.usd] Warning: in _ReportErrors at line 3172 of /builds/omniverse/usd-ci/USD/pxr/usd/usd/stage.cpp -- In </acrobot/base_link/visuals>: Unresolved reference prim path @/tmp/IsaacLab/usd_20260204_173757_1824/configuration/rotary_double_pendulum_base.usd@</visuals/base_link> introduced by @/tmp/IsaacLab/usd_20260204_173757_1824/configuration/rotary_double_pendulum_base.usd@</acrobot/base_link/visuals> (recomposing stage on stage @/tmp/IsaacLab/usd_20260204_173757_1824/configuration/rotary_double_pendulum_base.usd@ <0x65d92e50>)
+
+2026-02-04T08:37:57Z [8,025ms] [Warning] [omni.usd] Warning: in _ReportErrors at line 3172 of /builds/omniverse/usd-ci/USD/pxr/usd/usd/stage.cpp -- In </acrobot/base_link/visuals>: Unresolved reference prim path @/tmp/IsaacLab/usd_20260204_173757_1824/configuration/rotary_double_pendulum_base.usd@</visuals/base_link> introduced by @/tmp/IsaacLab/usd_20260204_173757_1824/configuration/rotary_double_pendulum_base.usd@</acrobot/base_link/visuals> (recomposing stage on stage @/tmp/IsaacLab/usd_20260204_173757_1824/rotary_double_pendulum.usd@ <0x65d77e40>)
+
+2026-02-04T08:37:57Z [8,025ms] [Warning] [omni.usd] Warning: in _ReportErrors at line 3172 of /builds/omniverse/usd-ci/USD/pxr/usd/usd/stage.cpp -- In </acrobot/base_link/visuals>: Unresolved reference prim path @/tmp/IsaacLab/usd_20260204_173757_1824/configuration/rotary_double_pendulum_base.usd@</visuals/base_link> introduced by @/tmp/IsaacLab/usd_20260204_173757_1824/configuration/rotary_double_pendulum_base.usd@</acrobot/base_link/visuals> (recomposing stage on stage @/tmp/IsaacLab/usd_20260204_173757_1824/rotary_double_pendulum.usd@ <0x65d73ee0>)
+
+2026-02-04T08:37:57Z [8,026ms] [Warning] [omni.usd] Warning: in _ReportErrors at line 3172 of /builds/omniverse/usd-ci/USD/pxr/usd/usd/stage.cpp -- In </acrobot/base_link/visuals>: Unresolved reference prim path @/tmp/IsaacLab/usd_20260204_173757_1824/configuration/rotary_double_pendulum_physics.usd@</visuals/base_link> introduced by @/tmp/IsaacLab/usd_20260204_173757_1824/configuration/rotary_double_pendulum_base.usd@</acrobot/base_link/visuals> (recomposing stage on stage @/tmp/IsaacLab/usd_20260204_173757_1824/rotary_double_pendulum.usd@ <0x65d77e40>)
+
+2026-02-04T08:37:57Z [8,026ms] [Warning] [omni.usd] Warning: in _ReportErrors at line 3172 of /builds/omniverse/usd-ci/USD/pxr/usd/usd/stage.cpp -- In </acrobot/base_link/visuals>: Unresolved reference prim path @/tmp/IsaacLab/usd_20260204_173757_1824/configuration/rotary_double_pendulum_physics.usd@</visuals/base_link> introduced by @/tmp/IsaacLab/usd_20260204_173757_1824/configuration/rotary_double_pendulum_base.usd@</acrobot/base_link/visuals> (recomposing stage on stage @/tmp/IsaacLab/usd_20260204_173757_1824/rotary_double_pendulum.usd@ <0x65d73ee0>)
+
+2026-02-04T08:37:57Z [8,027ms] [Warning] [omni.usd] Warning: in _ReportErrors at line 3172 of /builds/omniverse/usd-ci/USD/pxr/usd/usd/stage.cpp -- In </acrobot/base_link/visuals>: Unresolved reference prim path @/tmp/IsaacLab/usd_20260204_173757_1824/configuration/rotary_double_pendulum_physics.usd@</visuals/base_link> introduced by @/tmp/IsaacLab/usd_20260204_173757_1824/configuration/rotary_double_pendulum_base.usd@</acrobot/base_link/visuals> (recomposing stage on stage @/tmp/IsaacLab/usd_20260204_173757_1824/rotary_double_pendulum.usd@ <0x65d77e40>)
+
+2026-02-04T08:37:57Z [8,027ms] [Warning] [omni.usd] Warning: in _ReportErrors at line 3172 of /builds/omniverse/usd-ci/USD/pxr/usd/usd/stage.cpp -- In </acrobot/base_link/visuals>: Unresolved reference prim path @/tmp/IsaacLab/usd_20260204_173757_1824/configuration/rotary_double_pendulum_physics.usd@</visuals/base_link> introduced by @/tmp/IsaacLab/usd_20260204_173757_1824/configuration/rotary_double_pendulum_base.usd@</acrobot/base_link/visuals> (recomposing stage on stage @/tmp/IsaacLab/usd_20260204_173757_1824/rotary_double_pendulum.usd@ <0x65d73ee0>)
+
+2026-02-04T08:37:57Z [8,028ms] [Warning] [omni.usd] Warning: in _ReportErrors at line 3172 of /builds/omniverse/usd-ci/USD/pxr/usd/usd/stage.cpp -- In </acrobot/base_link/visuals>: Unresolved reference prim path @/tmp/IsaacLab/usd_20260204_173757_1824/configuration/rotary_double_pendulum_physics.usd@</visuals/base_link> introduced by @/tmp/IsaacLab/usd_20260204_173757_1824/configuration/rotary_double_pendulum_base.usd@</acrobot/base_link/visuals> (recomposing stage on stage @/tmp/IsaacLab/usd_20260204_173757_1824/rotary_double_pendulum.usd@ <0x65d77e40>)
+
+2026-02-04T08:37:57Z [8,028ms] [Warning] [omni.usd] Warning: in _ReportErrors at line 3172 of /builds/omniverse/usd-ci/USD/pxr/usd/usd/stage.cpp -- In </acrobot/base_link/visuals>: Unresolved reference prim path @/tmp/IsaacLab/usd_20260204_173757_1824/configuration/rotary_double_pendulum_physics.usd@</visuals/base_link> introduced by @/tmp/IsaacLab/usd_20260204_173757_1824/configuration/rotary_double_pendulum_base.usd@</acrobot/base_link/visuals> (recomposing stage on stage @/tmp/IsaacLab/usd_20260204_173757_1824/rotary_double_pendulum.usd@ <0x65d73ee0>)
+
+2026-02-04T08:37:57Z [8,029ms] [Warning] [omni.usd] Warning: in _ReportErrors at line 3172 of /builds/omniverse/usd-ci/USD/pxr/usd/usd/stage.cpp -- In </acrobot/base_link/visuals>: Unresolved reference prim path @/tmp/IsaacLab/usd_20260204_173757_1824/configuration/rotary_double_pendulum_physics.usd@</visuals/base_link> introduced by @/tmp/IsaacLab/usd_20260204_173757_1824/configuration/rotary_double_pendulum_base.usd@</acrobot/base_link/visuals> (recomposing stage on stage @/tmp/IsaacLab/usd_20260204_173757_1824/rotary_double_pendulum.usd@ <0x65d77e40>)
+
+2026-02-04T08:37:57Z [8,029ms] [Warning] [omni.usd] Warning: in _ReportErrors at line 3172 of /builds/omniverse/usd-ci/USD/pxr/usd/usd/stage.cpp -- In </acrobot/base_link/visuals>: Unresolved reference prim path @/tmp/IsaacLab/usd_20260204_173757_1824/configuration/rotary_double_pendulum_physics.usd@</visuals/base_link> introduced by @/tmp/IsaacLab/usd_20260204_173757_1824/configuration/rotary_double_pendulum_base.usd@</acrobot/base_link/visuals> (recomposing stage on stage @/tmp/IsaacLab/usd_20260204_173757_1824/rotary_double_pendulum.usd@ <0x65d73ee0>)
+
+2026-02-04T08:37:57Z [8,030ms] [Warning] [omni.usd] Warning: in _ReportErrors at line 3172 of /builds/omniverse/usd-ci/USD/pxr/usd/usd/stage.cpp -- In </acrobot/base_link/visuals>: Unresolved reference prim path @/tmp/IsaacLab/usd_20260204_173757_1824/configuration/rotary_double_pendulum_physics.usd@</visuals/base_link> introduced by @/tmp/IsaacLab/usd_20260204_173757_1824/configuration/rotary_double_pendulum_base.usd@</acrobot/base_link/visuals> (recomposing stage on stage @/tmp/IsaacLab/usd_20260204_173757_1824/rotary_double_pendulum.usd@ <0x65d77e40>)
+
+2026-02-04T08:37:57Z [8,030ms] [Warning] [omni.usd] Warning: in _ReportErrors at line 3172 of /builds/omniverse/usd-ci/USD/pxr/usd/usd/stage.cpp -- In </acrobot/base_link/visuals>: Unresolved reference prim path @/tmp/IsaacLab/usd_20260204_173757_1824/configuration/rotary_double_pendulum_physics.usd@</visuals/base_link> introduced by @/tmp/IsaacLab/usd_20260204_173757_1824/configuration/rotary_double_pendulum_base.usd@</acrobot/base_link/visuals> (recomposing stage on stage @/tmp/IsaacLab/usd_20260204_173757_1824/rotary_double_pendulum.usd@ <0x65d73ee0>)
+
+2026-02-04T08:37:57Z [8,031ms] [Warning] [omni.usd] Warning: in _ReportErrors at line 3172 of /builds/omniverse/usd-ci/USD/pxr/usd/usd/stage.cpp -- In </acrobot/base_link/visuals>: Unresolved reference prim path @/tmp/IsaacLab/usd_20260204_173757_1824/configuration/rotary_double_pendulum_physics.usd@</visuals/base_link> introduced by @/tmp/IsaacLab/usd_20260204_173757_1824/configuration/rotary_double_pendulum_base.usd@</acrobot/base_link/visuals> (recomposing stage on stage @/tmp/IsaacLab/usd_20260204_173757_1824/rotary_double_pendulum.usd@ <0x65d77e40>)
+
+2026-02-04T08:37:57Z [8,031ms] [Warning] [omni.usd] Warning: in _ReportErrors at line 3172 of /builds/omniverse/usd-ci/USD/pxr/usd/usd/stage.cpp -- In </acrobot/base_link/visuals>: Unresolved reference prim path @/tmp/IsaacLab/usd_20260204_173757_1824/configuration/rotary_double_pendulum_physics.usd@</visuals/base_link> introduced by @/tmp/IsaacLab/usd_20260204_173757_1824/configuration/rotary_double_pendulum_base.usd@</acrobot/base_link/visuals> (recomposing stage on stage @/tmp/IsaacLab/usd_20260204_173757_1824/rotary_double_pendulum.usd@ <0x65d73ee0>)
+
+2026-02-04T08:37:57Z [8,032ms] [Warning] [omni.usd] Warning: in _ReportErrors at line 3172 of /builds/omniverse/usd-ci/USD/pxr/usd/usd/stage.cpp -- In </acrobot/base_link/visuals>: Unresolved reference prim path @/tmp/IsaacLab/usd_20260204_173757_1824/configuration/rotary_double_pendulum_physics.usd@</visuals/base_link> introduced by @/tmp/IsaacLab/usd_20260204_173757_1824/configuration/rotary_double_pendulum_base.usd@</acrobot/base_link/visuals> (recomposing stage on stage @/tmp/IsaacLab/usd_20260204_173757_1824/rotary_double_pendulum.usd@ <0x65d77e40>)
+
+2026-02-04T08:37:57Z [8,032ms] [Warning] [omni.usd] Warning: in _ReportErrors at line 3172 of /builds/omniverse/usd-ci/USD/pxr/usd/usd/stage.cpp -- In </acrobot/base_link/visuals>: Unresolved reference prim path @/tmp/IsaacLab/usd_20260204_173757_1824/configuration/rotary_double_pendulum_physics.usd@</visuals/base_link> introduced by @/tmp/IsaacLab/usd_20260204_173757_1824/configuration/rotary_double_pendulum_base.usd@</acrobot/base_link/visuals> (recomposing stage on stage @/tmp/IsaacLab/usd_20260204_173757_1824/rotary_double_pendulum.usd@ <0x65d73ee0>)
+
+2026-02-04T08:37:57Z [8,139ms] [Warning] [omni.usd] Warning: in _ReportErrors at line 3172 of /builds/omniverse/usd-ci/USD/pxr/usd/usd/stage.cpp -- In </World/envs/env_0/Robot/base_link/visuals>: Unresolved reference prim path @/tmp/IsaacLab/usd_20260204_173757_1824/configuration/rotary_double_pendulum_physics.usd@</visuals/base_link> introduced by @/tmp/IsaacLab/usd_20260204_173757_1824/configuration/rotary_double_pendulum_base.usd@</acrobot/base_link/visuals> (recomposing stage on stage @anon:0x49419650:World0.usd@ <0x4941a5e0>)
+
+2026-02-04T08:37:58Z [9,558ms] [Warning] [omni.fabric.plugin] Warning: input prim:attr `/World/envs/env_0:omni:rtx:skip` has no valid data.
+
+[INFO]: Time taken for scene creation : 1.626296 seconds
+[INFO]: Scene manager:  <class InteractiveScene>
+	Number of environments: 8
+	Environment spacing   : 2.5
+	Source prim name      : /World/envs/env_0
+	Global prim paths     : []
+	Replicate physics     : True
+[INFO]: Starting the simulation. This may take a few seconds. Please wait...
+2026-02-04T08:37:59Z [9,895ms] [Warning] [isaaclab.assets.articulation.articulation] Not all actuators are configured! Total number of actuated joints not equal to number of joints available: 1 != 2.
+2026-02-04T08:37:59Z [9,912ms] [Warning] [omni.fabric.plugin] getAttributeCount called on non-existent path /World/envs/env_7/Robot/link2/collisions/end_marker_col
+2026-02-04T08:37:59Z [9,912ms] [Warning] [omni.fabric.plugin] getTypes called on non-existent path /World/envs/env_7/Robot/link2/collisions/end_marker_col
+[INFO]: Time taken for simulation start : 0.882744 seconds
+Creating window for environment.
+ManagerLiveVisualizer cannot be created for manager: action_manager, Manager does not exist
+ManagerLiveVisualizer cannot be created for manager: observation_manager, Manager does not exist
+[INFO]: Completed setting up the environment...
+[INFO]: Loading model checkpoint from: /home/uniubi/projects/forklift_sim/IsaacLab/logs/rl_games/rotary_double_pendulum_direct/2026-02-04_17-07-28/nn/rotary_double_pendulum_direct.pth
+self.seed = 42
+{'observation_space': Box(-10.0, 10.0, (6,), float32), 'action_space': Box(-1.0, 1.0, (1,), float32), 'agents': 1, 'value_size': 1}
+build mlp: 6
+RunningMeanStd:  (1,)
+RunningMeanStd:  (6,)
+=> loading checkpoint '/home/uniubi/projects/forklift_sim/IsaacLab/logs/rl_games/rotary_double_pendulum_direct/2026-02-04_17-07-28/nn/rotary_double_pendulum_direct.pth'
+2026-02-04T08:38:01Z [12,119ms] [Warning] [carb] Client gpu.foundation.plugin has acquired [gpu::unstable::IMemoryBudgetManagerFactory v0.1] 100 times. Consider accessing this interface with carb::getCachedInterface() (Performance warning)
+^C^C^C^C
+uniubi@uniubi:~/projects/wzdlb1$ 
+uniubi@uniubi:~/projects/wzdlb1$ 

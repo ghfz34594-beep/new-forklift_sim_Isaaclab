@@ -1,75 +1,40 @@
-# Building Documentation
+# 文档导航（先读这个）
 
-We use [Sphinx](https://www.sphinx-doc.org/en/master/) with the [Book Theme](https://sphinx-book-theme.readthedocs.io/en/stable/) for maintaining and generating our documentation.
+这套文档面向**不太懂强化学习 / 仿真 / Isaac Sim / Isaac Lab**的读者，目标是让你能：
 
-> **Note:** To avoid dependency conflicts, we strongly recommend using a Python virtual environment to isolate the required dependencies from your system's global Python environment.
+- **跑起来**：把叉车任务训练跑通并产出 checkpoint
+- **看懂**：这项任务在训练什么、奖励如何引导行为
+- **会排障**：遇到“不动/不收敛/太慢/倾翻”能定位问题
 
-## Current-Version Documentation
+---
 
-This section describes how to build the documentation for the current version of the project.
+## 阅读路径（按你的情况选）
 
-<details open>
-<summary><strong>Linux</strong></summary>
+### A. 我只想尽快跑起来（推荐）
 
-```bash
-# 1. Navigate to the docs directory and install dependencies
-cd docs
-pip install -r requirements.txt
+1) [`00_prereqs_and_versions.md`](./00_prereqs_and_versions.md)：前置条件与版本建议（避免卡安装/兼容）
+2) [`01_quickstart.md`](./01_quickstart.md)：最短路径：打补丁→开训→回放
 
-# 2. Build the current documentation
-make current-docs
+### B. 我能跑起来，但想理解“训练目标是什么/为什么这么设定”
 
-# 3. Open the current docs
-xdg-open _build/current/index.html
-```
-</details>
+1) [`02_task_overview.md`](./02_task_overview.md)：任务边界与场景里有什么物体
+2) [`03_task_design_rl.md`](./03_task_design_rl.md)：动作/观测/奖励/成功判定（用大白话解释）
 
-<details> <summary><strong>Windows</strong></summary>
+### C. 我想系统掌握训练、日志、checkpoint、导出与评估
 
-```batch
-:: 1. Navigate to the docs directory and install dependencies
-cd docs
-pip install -r requirements.txt
+1) [`04_training_and_artifacts.md`](./04_training_and_artifacts.md)：训练命令、参数含义、日志与产物结构
+2) [`05_evaluation_and_export.md`](./05_evaluation_and_export.md)：回放、录视频、导出 ONNX/JIT
 
-:: 2. Build the current documentation
-make current-docs
+### D. 我想给叉车加相机 / 把输入改成图像
 
-:: 3. Open the current docs
-start _build\current\index.html
-```
-</details>
+1) [`07_vision_input.md`](./07_vision_input.md)：视觉输入与相机配置、进阶迭代路线图（Phase 0~6）
 
+### E. 我遇到问题（不动/报错/很慢/一直翻车）
 
-## Multi-Version Documentation
+1) [`06_troubleshooting.md`](./06_troubleshooting.md)：按现象排障
+2) [`troubleshooting_cases/README.md`](./troubleshooting_cases/README.md)：排障案例复盘库（真实问题→定位→修复→验证）
 
-This section describes how to build the multi-version documentation, which includes previous tags and the main branch.
+### F. 术语不懂（PPO、episode、headless…）
 
-<details open> <summary><strong>Linux</strong></summary>
+1) [`99_glossary.md`](./99_glossary.md)：小词典
 
-```bash
-# 1. Navigate to the docs directory and install dependencies
-cd docs
-pip install -r requirements.txt
-
-# 2. Build the multi-version documentation
-make multi-docs
-
-# 3. Open the multi-version docs
-xdg-open _build/index.html
-```
-</details>
-
-<details> <summary><strong>Windows</strong></summary>
-
-```batch
-:: 1. Navigate to the docs directory and install dependencies
-cd docs
-pip install -r requirements.txt
-
-:: 2. Build the multi-version documentation
-make multi-docs
-
-:: 3. Open the multi-version docs
-start _build\index.html
-```
-</details>

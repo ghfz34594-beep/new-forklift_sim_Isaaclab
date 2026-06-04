@@ -1,78 +1,69 @@
-# C++
-**/cmake-build*/
-**/build*/
-**/*.so
-**/*.log*
-
-# Omniverse
-**/*.dmp
-**/.thumbs
-
-# No USD files allowed in the repo, except the forklift project assets.
-**/*.usd
-**/*.usda
-**/*.usdc
-**/*.usdz
-!assets/
-!assets/*.usd
-!assets/*.usda
-!assets/*.usdc
-!assets/*.usdz
-
-# Python
-.DS_Store
-**/*.egg-info/
-**/__pycache__/
-**/.pytest_cache/
-**/*.pyc
-**/*.pb
-
-# Docker/Singularity
-**/*.sif
-docker/cluster/exports/
-docker/.container.cfg
-
-# IDE
-**/.idea/
-**/.vscode/
-# Don't ignore the top-level .vscode directory as it is
-# used to configure VS Code settings
-!.vscode
-
-# Outputs
-**/output/*
+# Generated runtime data
+logs/
+**/logs/
+output/
+outputs/*
+!outputs/.gitkeep
 **/outputs/*
-**/videos/*
-**/wandb/*
-**/.neptune/*
-docker/artifacts/
+!**/outputs/.gitkeep
+data/
+**/data/
+wandb/
+**/wandb/
+
+# Training artifacts and datasets
+*.pt
+*.pth
+*.onnx
+*.h5
+*.db
+*.sqlite
+
+# Python/cache/build outputs
+__pycache__/
+**/__pycache__/
+*.py[cod]
+.pytest_cache/
+**/.pytest_cache/
+build/
+dist/
+*.egg-info/
+
+# Isaac Sim / local caches
+_isaac_sim
+_repo/
+_build/
+**/cache/
+**/nucleus_cache/
+**/.thumbs/
+*.dmp
+
+# Local logs and transient files
+*.log
+exit_code.txt
 *.tmp
+*.bak
+*.backup
+.DS_Store
 
-# Doc Outputs
-**/docs/_build/*
-**/generated/*
+# Keep required project USD assets only.
+*.usd
+*.usda
+*.usdc
+*.usdz
+!forklift_sim/assets/*.usd
+!forklift_sim/assets/*.usda
+!forklift_sim/assets/*.usdc
+!forklift_sim/assets/*.usdz
+!forklift_sim_exp9/assets/*.usd
+!forklift_sim_exp9/assets/*.usda
+!forklift_sim_exp9/assets/*.usdc
+!forklift_sim_exp9/assets/*.usdz
+!forklift_sim/IsaacLab/assets/*.usd
+!forklift_sim/IsaacLab/assets/*.usda
+!forklift_sim/IsaacLab/assets/*.usdc
+!forklift_sim/IsaacLab/assets/*.usdz
 
-# Isaac-Sim packman
-_isaac_sim*
-_repo
-_build
-.lastformat
-
-# RL-Games
-**/runs/*
-**/logs/*
-**/recordings/*
-
-# Pre-Trained Checkpoints
-/.pretrained_checkpoints/
-
-# Teleop Recorded Dataset
-/datasets/
-
-# Tests
-tests/
-!forklift_project/**/tests/
-!forklift_project/**/tests/**
-
-# Docker history
-.isaac-lab-docker-history
+# Preserve selected project test directories even though IsaacLab ignores tests.
+!forklift_sim_exp9/**/tests/
+!forklift_sim_exp9/**/tests/**
