@@ -1172,8 +1172,14 @@ class ForkliftPalletInsertLiftEnv(DirectRLEnv):
                 )
 
             if self._dual_camera_enabled:
-                self.cfg.tiled_camera_left.prim_path = f"/World/envs/env_.*/Robot/{mount_body}/CameraLeft"
-                self.cfg.tiled_camera_right.prim_path = f"/World/envs/env_.*/Robot/{mount_body}/CameraRight"
+                # Spawn RTX cameras at the env root and drive their world pose
+                # explicitly from the forklift root every render. Keeping them
+                # under Robot/body while also writing world poses can make the
+                # tiled-camera render product observe parent motion plus manual
+                # pose updates, which looks like the camera is drifting faster
+                # than the forklift.
+                self.cfg.tiled_camera_left.prim_path = "/World/envs/env_.*/CameraLeft"
+                self.cfg.tiled_camera_right.prim_path = "/World/envs/env_.*/CameraRight"
                 self.cfg.tiled_camera_left.offset.pos = self.cfg.dual_camera_left_pos_local
                 self.cfg.tiled_camera_right.offset.pos = self.cfg.dual_camera_right_pos_local
                 self.cfg.tiled_camera_left.offset.rot = _quat_from_rpy_deg(*self.cfg.dual_camera_left_rpy_local_deg)
@@ -1273,8 +1279,8 @@ class ForkliftPalletInsertLiftEnv(DirectRLEnv):
             return
         if env_ids is None:
             env_ids = torch.arange(self.num_envs, dtype=torch.long, device=self.device)
-            base_pos = self.robot.data.root_pos_w
-            base_quat = self.robot.data.root_quat_w
+            base_pos = self.robot.data.root_pos_w if root_pos is None else root_pos
+            base_quat = self.robot.data.root_quat_w if root_quat is None else root_quat
         else:
             env_ids = env_ids.to(device=self.device, dtype=torch.long)
             base_pos = self.robot.data.root_pos_w[env_ids] if root_pos is None else root_pos
@@ -1300,6 +1306,13 @@ class ForkliftPalletInsertLiftEnv(DirectRLEnv):
         self._camera_left.set_world_poses(left_pos_w, left_quat_w, env_ids=env_ids, convention="world")
         self._camera_right.set_world_poses(right_pos_w, right_quat_w, env_ids=env_ids, convention="world")
 
+    def _latest_robot_root_pose_from_physx(self) -> tuple[torch.Tensor, torch.Tensor]:
+        """Read the latest robot root pose from PhysX without advancing IsaacLab data timestamps."""
+        root_pose = self.robot.root_physx_view.get_root_transforms().clone()
+        root_quat_xyzw = root_pose[:, 3:7]
+        root_quat_wxyz = torch.cat((root_quat_xyzw[:, 3:4], root_quat_xyzw[:, :3]), dim=-1)
+        return root_pose[:, :3], root_quat_wxyz
+
     def step(self, action: torch.Tensor):
         """Step the env while syncing body-mounted RTX cameras before every render."""
         if bool(getattr(self.cfg, "legacy_direct_step_enable", False)):
@@ -1318,7 +1331,8 @@ class ForkliftPalletInsertLiftEnv(DirectRLEnv):
             self.scene.write_data_to_sim()
             self.sim.step(render=False)
             if self._sim_step_counter % self.cfg.sim.render_interval == 0 and is_rendering:
-                self._sync_dual_camera_poses()
+                root_pos, root_quat = self._latest_robot_root_pose_from_physx()
+                self._sync_dual_camera_poses(root_pos=root_pos, root_quat=root_quat)
                 self.sim.render()
             self.scene.update(dt=self.physics_dt)
 

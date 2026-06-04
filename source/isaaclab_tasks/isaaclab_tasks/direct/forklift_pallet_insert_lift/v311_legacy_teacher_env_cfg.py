@@ -2070,6 +2070,12 @@ class ForkliftPalletApproachV311LegacyAcceptedTeacherVisualFreshCurvePhaseLatchP
 ):
     """Stage 2C-v5: explicitly latch the pre-align phase before insertion rewards."""
 
+    dual_camera_hfov_deg: float = 100.0
+    dual_camera_left_pos_local: tuple[float, float, float] = (190.0, 75.0, 140.0)
+    dual_camera_right_pos_local: tuple[float, float, float] = (190.0, -75.0, 140.0)
+    dual_camera_left_rpy_local_deg: tuple[float, float, float] = (0.0, 25.0, -20.0)
+    dual_camera_right_rpy_local_deg: tuple[float, float, float] = (0.0, 25.0, 20.0)
+
     progress_teacher_pre_align_latch_enable: bool = True
     progress_teacher_pre_align_latch_dist_front_m: float = 0.58
     progress_teacher_pre_align_latch_center_m: float = 0.22

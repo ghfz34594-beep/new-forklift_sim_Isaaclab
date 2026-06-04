@@ -37,7 +37,7 @@ from isaaclab.assets import Articulation, RigidObject
 from isaaclab.envs import DirectRLEnv
 from isaaclab.sensors import TiledCamera
 from isaaclab.sim.spawners.from_files import spawn_ground_plane
-from isaaclab.utils.math import quat_apply, quat_apply_inverse, sample_uniform
+from isaaclab.utils.math import quat_apply, quat_apply_inverse, quat_mul, sample_uniform
 
 from .v311_legacy_teacher_env_cfg import ForkliftPalletInsertLiftEnvCfg
 from .clamped_actor_critic import ClampedActorCritic
@@ -696,6 +696,96 @@ class ForkliftPalletInsertLiftEnv(DirectRLEnv):
     def _pallet_disp_xy(self) -> torch.Tensor:
         """Pallet XY displacement from the actual reset pose of each env."""
         return torch.norm(self.pallet.data.root_pos_w[:, :2] - self._pallet_reset_xy_w, dim=-1)
+
+    def _camera_local_pos_to_m(self, values: tuple[float, float, float]) -> torch.Tensor:
+        """Convert configured forklift local camera offsets to simulation meters."""
+        pos = torch.tensor(values, dtype=torch.float32, device=self.device)
+        if torch.max(torch.abs(pos)).item() > 10.0:
+            pos = pos * 0.01
+        return pos
+
+    def _sync_dual_camera_poses(
+        self,
+        env_ids: torch.Tensor | None = None,
+        root_pos: torch.Tensor | None = None,
+        root_quat: torch.Tensor | None = None,
+    ) -> None:
+        """Keep USD camera prims attached to the PhysX forklift root pose before rendering."""
+        if not self._camera_initialized or not self._dual_camera_enabled:
+            return
+        if self._camera_left is None or self._camera_right is None:
+            return
+        if env_ids is None:
+            env_ids = torch.arange(self.num_envs, dtype=torch.long, device=self.device)
+            base_pos = self.robot.data.root_pos_w
+            base_quat = self.robot.data.root_quat_w
+        else:
+            env_ids = env_ids.to(device=self.device, dtype=torch.long)
+            base_pos = self.robot.data.root_pos_w[env_ids] if root_pos is None else root_pos
+            base_quat = self.robot.data.root_quat_w[env_ids] if root_quat is None else root_quat
+
+        left_pos_l = self._camera_local_pos_to_m(tuple(float(v) for v in self.cfg.dual_camera_left_pos_local))
+        right_pos_l = self._camera_local_pos_to_m(tuple(float(v) for v in self.cfg.dual_camera_right_pos_local))
+        left_quat_l = torch.tensor(
+            _quat_from_rpy_deg(*self.cfg.dual_camera_left_rpy_local_deg),
+            dtype=torch.float32,
+            device=self.device,
+        )
+        right_quat_l = torch.tensor(
+            _quat_from_rpy_deg(*self.cfg.dual_camera_right_rpy_local_deg),
+            dtype=torch.float32,
+            device=self.device,
+        )
+
+        left_pos_w = base_pos + quat_apply(base_quat, left_pos_l.expand_as(base_pos))
+        right_pos_w = base_pos + quat_apply(base_quat, right_pos_l.expand_as(base_pos))
+        left_quat_w = quat_mul(base_quat, left_quat_l.expand_as(base_quat))
+        right_quat_w = quat_mul(base_quat, right_quat_l.expand_as(base_quat))
+        self._camera_left.set_world_poses(left_pos_w, left_quat_w, env_ids=env_ids, convention="world")
+        self._camera_right.set_world_poses(right_pos_w, right_quat_w, env_ids=env_ids, convention="world")
+
+    def step(self, action: torch.Tensor):
+        """Step the env while syncing body-mounted RTX cameras before every render."""
+        action = action.to(self.device)
+        if self.cfg.action_noise_model:
+            action = self._action_noise_model(action)
+
+        self._pre_physics_step(action)
+        is_rendering = self.sim.has_gui() or self.sim.has_rtx_sensors()
+
+        for _ in range(self.cfg.decimation):
+            self._sim_step_counter += 1
+            self._apply_action()
+            self.scene.write_data_to_sim()
+            self.sim.step(render=False)
+            if self._sim_step_counter % self.cfg.sim.render_interval == 0 and is_rendering:
+                self._sync_dual_camera_poses()
+                self.sim.render()
+            self.scene.update(dt=self.physics_dt)
+
+        self.episode_length_buf += 1
+        self.common_step_counter += 1
+
+        self.reset_terminated[:], self.reset_time_outs[:] = self._get_dones()
+        self.reset_buf = self.reset_terminated | self.reset_time_outs
+        self.reward_buf = self._get_rewards()
+
+        reset_env_ids = self.reset_buf.nonzero(as_tuple=False).squeeze(-1)
+        if len(reset_env_ids) > 0:
+            self._reset_idx(reset_env_ids)
+            if self.sim.has_rtx_sensors() and self.cfg.rerender_on_reset:
+                self._sync_dual_camera_poses(reset_env_ids)
+                self.sim.render()
+
+        if self.cfg.events:
+            if "interval" in self.event_manager.available_modes:
+                self.event_manager.apply(mode="interval", dt=self.step_dt)
+
+        self.obs_buf = self._get_observations()
+        if self.cfg.observation_noise_model:
+            self.obs_buf["policy"] = self._observation_noise_model(self.obs_buf["policy"])
+
+        return self.obs_buf, self.reward_buf, self.reset_terminated, self.reset_time_outs, self.extras
 
     def _fix_lift_joint_drive(self):
         """覆盖 lift_joint 的 USD DriveAPI 参数为位置控制模式。
@@ -6068,7 +6158,11 @@ class ForkliftPalletInsertLiftEnv(DirectRLEnv):
         self._window_filled[env_ids] = False
 
         # ---- 托盘固定位姿（可选：后续可加随机化） ----
-        pallet_pos = torch.tensor(self.cfg.pallet_cfg.init_state.pos, device=self.device).repeat(len(env_ids), 1)
+        env_origins = torch.zeros((len(env_ids), 3), device=self.device)
+        if not bool(getattr(self.cfg, "legacy_reset_world_origin_enable", False)):
+            env_origins = self.scene.env_origins[env_ids]
+        pallet_pos_local = torch.tensor(self.cfg.pallet_cfg.init_state.pos, device=self.device).repeat(len(env_ids), 1)
+        pallet_pos = pallet_pos_local + env_origins
         pallet_quat = torch.tensor(self.cfg.pallet_cfg.init_state.rot, device=self.device).repeat(len(env_ids), 1)
         self._write_root_pose(self.pallet, pallet_pos, pallet_quat, env_ids)
         self._pallet_reset_xy_w[env_ids] = pallet_pos[:, :2]
@@ -6212,7 +6306,8 @@ class ForkliftPalletInsertLiftEnv(DirectRLEnv):
             )
         z = torch.full((len(env_ids), 1), 0.03, device=self.device)
 
-        pos = torch.cat([x, y, z], dim=1)
+        pos_local = torch.cat([x, y, z], dim=1)
+        pos = pos_local + env_origins
         half = yaw * 0.5
         quat = torch.cat([torch.cos(half), torch.zeros_like(half), torch.zeros_like(half), torch.sin(half)], dim=1)
         self._debug_reset_x[env_ids] = x.squeeze(-1)
@@ -6220,6 +6315,7 @@ class ForkliftPalletInsertLiftEnv(DirectRLEnv):
         self._debug_reset_yaw_deg[env_ids] = yaw.squeeze(-1) * (180.0 / math.pi)
 
         self._write_root_pose(self.robot, pos, quat, env_ids)
+        self._sync_dual_camera_poses(env_ids, root_pos=pos, root_quat=quat)
 
         # 速度清零
         zeros3 = torch.zeros((len(env_ids), 3), device=self.device)
