@@ -808,6 +808,54 @@ gym.register(
 )
 
 gym.register(
+    id="Isaac-Forklift-PalletApproach-V311LegacyAcceptedTeacherVisualFreshCurvePhaseLatchPreAlignV6ReleaseGateGeoObsAblation-v0",
+    entry_point=f"{__name__}.v311_legacy_teacher_env:ForkliftPalletInsertLiftEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": (
+            f"{__name__}.v311_legacy_teacher_env_cfg:"
+            "ForkliftPalletApproachV311LegacyAcceptedTeacherVisualFreshCurvePhaseLatchPreAlignV6ReleaseGateGeoObsAblationEnvCfg"
+        ),
+        "rsl_rl_cfg_entry_point": (
+            f"{agents.__name__}.v311_legacy_teacher_rsl_rl_ppo_cfg:"
+            "ForkliftInsertLiftGeoEdgePPORunnerCfg"
+        ),
+    },
+)
+
+gym.register(
+    id="Isaac-Forklift-PalletApproach-V311LegacyAcceptedTeacherVisualFreshCurvePhaseLatchPreAlignV6ReleaseGateGeoObsTerminalFixA-v0",
+    entry_point=f"{__name__}.v311_legacy_teacher_env:ForkliftPalletInsertLiftEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": (
+            f"{__name__}.v311_legacy_teacher_env_cfg:"
+            "ForkliftPalletApproachV311LegacyAcceptedTeacherVisualFreshCurvePhaseLatchPreAlignV6ReleaseGateGeoObsTerminalFixAEnvCfg"
+        ),
+        "rsl_rl_cfg_entry_point": (
+            f"{agents.__name__}.v311_legacy_teacher_rsl_rl_ppo_cfg:"
+            "ForkliftInsertLiftGeoEdgePPORunnerCfg"
+        ),
+    },
+)
+
+gym.register(
+    id="Isaac-Forklift-PalletApproach-V311LegacyAcceptedTeacherVisualFreshCurvePhaseLatchPreAlignV6ReleaseGateGeoObsTerminalFixB-v0",
+    entry_point=f"{__name__}.v311_legacy_teacher_env:ForkliftPalletInsertLiftEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": (
+            f"{__name__}.v311_legacy_teacher_env_cfg:"
+            "ForkliftPalletApproachV311LegacyAcceptedTeacherVisualFreshCurvePhaseLatchPreAlignV6ReleaseGateGeoObsTerminalFixBEnvCfg"
+        ),
+        "rsl_rl_cfg_entry_point": (
+            f"{agents.__name__}.v311_legacy_teacher_rsl_rl_ppo_cfg:"
+            "ForkliftInsertLiftGeoEdgePPORunnerCfg"
+        ),
+    },
+)
+
+gym.register(
     id="Isaac-Forklift-PalletApproach-V311LegacyAcceptedTeacherVisualFreshActionGuidanceW01-v0",
     entry_point=f"{__name__}.v311_legacy_teacher_env:ForkliftPalletInsertLiftEnv",
     disable_env_checker=True,

@@ -57,6 +57,33 @@ parser.add_argument(
     default=None,
     help="Path to a passing Room60 visual_isolation_summary.json required for multi-env Toyota RGB training.",
 )
+parser.add_argument("--camera_far", type=float, default=None, help="Optional override for dual-camera far clipping range.")
+parser.add_argument("--dual_camera_hfov_deg", type=float, default=None, help="Override dual-camera horizontal FoV.")
+parser.add_argument("--dual_camera_left_pos", type=float, nargs=3, default=None, metavar=("X", "Y", "Z"))
+parser.add_argument("--dual_camera_right_pos", type=float, nargs=3, default=None, metavar=("X", "Y", "Z"))
+parser.add_argument("--dual_camera_left_rpy_deg", type=float, nargs=3, default=None, metavar=("ROLL", "PITCH", "YAW"))
+parser.add_argument("--dual_camera_right_rpy_deg", type=float, nargs=3, default=None, metavar=("ROLL", "PITCH", "YAW"))
+parser.add_argument("--vision_room", action="store_true", default=None, help="Force per-env room occlusion on.")
+parser.add_argument("--no_vision_room", action="store_false", dest="vision_room", help="Force per-env room occlusion off.")
+parser.add_argument(
+    "--hold_counter_progress_reward",
+    action="store_true",
+    default=None,
+    help="Enable dense reward for progress in the post-insert hold counter.",
+)
+parser.add_argument(
+    "--no_hold_counter_progress_reward",
+    action="store_false",
+    dest="hold_counter_progress_reward",
+    help="Disable dense reward for progress in the post-insert hold counter.",
+)
+parser.add_argument(
+    "--hold_counter_progress_reward_weight",
+    type=float,
+    default=None,
+    help="Override hold_counter_progress_reward_weight for reward bottleneck ABs.",
+)
+parser.add_argument("--hold_time_s", type=float, default=None, help="Override success hold time for terminal-chain ABs.")
 parser.add_argument(
     "--distributed", action="store_true", default=False, help="Run training with multiple GPUs or nodes."
 )
@@ -393,6 +420,56 @@ def _camera_far_from_cfg(env_cfg) -> float | None:
         return None
 
 
+def _set_camera_far(env_cfg, far: float) -> None:
+    if hasattr(env_cfg, "dual_camera_far_clip_m"):
+        env_cfg.dual_camera_far_clip_m = float(far)
+    for name in ("tiled_camera_left", "tiled_camera_right"):
+        camera_cfg = getattr(env_cfg, name, None)
+        if camera_cfg is None:
+            continue
+        near = 0.1
+        try:
+            near = float(camera_cfg.spawn.clipping_range[0])
+        except Exception:
+            pass
+        camera_cfg.spawn.clipping_range = (near, float(far))
+
+
+def _apply_visual_training_overrides(env_cfg) -> None:
+    if args_cli.vision_room is not None and hasattr(env_cfg, "vision_room_enable"):
+        env_cfg.vision_room_enable = bool(args_cli.vision_room)
+    if args_cli.camera_far is not None:
+        _set_camera_far(env_cfg, float(args_cli.camera_far))
+    if args_cli.dual_camera_hfov_deg is not None:
+        env_cfg.dual_camera_hfov_deg = float(args_cli.dual_camera_hfov_deg)
+    if args_cli.dual_camera_left_pos is not None:
+        env_cfg.dual_camera_left_pos_local = tuple(float(v) for v in args_cli.dual_camera_left_pos)
+    if args_cli.dual_camera_right_pos is not None:
+        env_cfg.dual_camera_right_pos_local = tuple(float(v) for v in args_cli.dual_camera_right_pos)
+    if args_cli.dual_camera_left_rpy_deg is not None:
+        env_cfg.dual_camera_left_rpy_local_deg = tuple(float(v) for v in args_cli.dual_camera_left_rpy_deg)
+    if args_cli.dual_camera_right_rpy_deg is not None:
+        env_cfg.dual_camera_right_rpy_local_deg = tuple(float(v) for v in args_cli.dual_camera_right_rpy_deg)
+    if args_cli.hold_counter_progress_reward is not None and hasattr(env_cfg, "hold_counter_progress_reward_enable"):
+        env_cfg.hold_counter_progress_reward_enable = bool(args_cli.hold_counter_progress_reward)
+    if args_cli.hold_counter_progress_reward_weight is not None and hasattr(env_cfg, "hold_counter_progress_reward_weight"):
+        env_cfg.hold_counter_progress_reward_weight = float(args_cli.hold_counter_progress_reward_weight)
+    if args_cli.hold_time_s is not None and hasattr(env_cfg, "hold_time_s"):
+        env_cfg.hold_time_s = float(args_cli.hold_time_s)
+
+
+def _tuple_mismatch(summary: dict, summary_key: str, requested: object, label: str, mismatches: list[str]) -> None:
+    if summary_key not in summary:
+        return
+    expected = summary.get(summary_key)
+    if expected is None or requested is None:
+        return
+    exp_vals = [float(v) for v in expected]
+    req_vals = [float(v) for v in requested]
+    if len(exp_vals) != len(req_vals) or any(abs(a - b) > 1e-6 for a, b in zip(exp_vals, req_vals)):
+        mismatches.append(f"{label} summary={expected} requested={req_vals}")
+
+
 def _assert_visual_acceptance_matches(env_cfg, task_name: str | None, num_envs: int, summary_path: str) -> None:
     with open(summary_path, encoding="utf-8") as f:
         summary = json.load(f)
@@ -417,12 +494,35 @@ def _assert_visual_acceptance_matches(env_cfg, task_name: str | None, num_envs: 
             "vision_room_enable summary="
             f"{summary.get('vision_room_enable')} requested={bool(getattr(env_cfg, 'vision_room_enable', False))}"
         )
+    if "rerender_on_reset" in summary and bool(summary.get("rerender_on_reset", False)) != bool(
+        getattr(env_cfg, "rerender_on_reset", False)
+    ):
+        mismatches.append(
+            "rerender_on_reset summary="
+            f"{summary.get('rerender_on_reset')} requested={bool(getattr(env_cfg, 'rerender_on_reset', False))}"
+        )
 
     summary_dual = summary.get("dual_camera_config") or {}
     if abs(float(summary_dual.get("hfov_deg", -999.0)) - float(getattr(env_cfg, "dual_camera_hfov_deg", -1))) > 1e-6:
         mismatches.append(
             f"hfov summary={summary_dual.get('hfov_deg')} requested={float(getattr(env_cfg, 'dual_camera_hfov_deg', -1))}"
         )
+    _tuple_mismatch(summary_dual, "left_pos_local", getattr(env_cfg, "dual_camera_left_pos_local", None), "left_pos", mismatches)
+    _tuple_mismatch(summary_dual, "right_pos_local", getattr(env_cfg, "dual_camera_right_pos_local", None), "right_pos", mismatches)
+    _tuple_mismatch(
+        summary_dual,
+        "left_rpy_local_deg",
+        getattr(env_cfg, "dual_camera_left_rpy_local_deg", None),
+        "left_rpy",
+        mismatches,
+    )
+    _tuple_mismatch(
+        summary_dual,
+        "right_rpy_local_deg",
+        getattr(env_cfg, "dual_camera_right_rpy_local_deg", None),
+        "right_rpy",
+        mismatches,
+    )
     summary_far = summary.get("camera_far", None)
     cfg_far = _camera_far_from_cfg(env_cfg)
     if summary_far is not None and cfg_far is not None and abs(float(summary_far) - float(cfg_far)) > 1e-6:
@@ -470,6 +570,12 @@ def guard_multi_env_visual_training(env_cfg, task_name: str | None, num_envs: in
     toyota_visual_task = "ToyotaDualCamera" in task_name or (use_camera and use_dual_cameras)
     if not toyota_visual_task:
         return
+    if not bool(getattr(env_cfg, "rerender_on_reset", False)):
+        raise RuntimeError(
+            "Refusing multi-env RGB training with rerender_on_reset=False. "
+            "Dual-camera policy observations read RTX buffers, so reset must render a fresh frame before PPO sees "
+            "the new proprio/reset state."
+        )
     if args_cli.vision_acceptance_summary:
         _assert_visual_acceptance_matches(env_cfg, task_name, num_envs, args_cli.vision_acceptance_summary)
         return
@@ -494,6 +600,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     # override configurations with non-hydra CLI arguments
     agent_cfg = cli_args.update_rsl_rl_cfg(agent_cfg, args_cli)
     env_cfg.scene.num_envs = args_cli.num_envs if args_cli.num_envs is not None else env_cfg.scene.num_envs
+    _apply_visual_training_overrides(env_cfg)
     agent_cfg.max_iterations = (
         args_cli.max_iterations if args_cli.max_iterations is not None else agent_cfg.max_iterations
     )

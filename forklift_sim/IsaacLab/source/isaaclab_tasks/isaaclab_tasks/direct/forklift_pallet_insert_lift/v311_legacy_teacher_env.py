@@ -367,23 +367,34 @@ def _spawn_vision_isolation_room(env_prim_path: str, cfg) -> None:
     collision_props = None
     if bool(getattr(cfg, "vision_room_collision_enable", True)):
         collision_props = sim_utils.CollisionPropertiesCfg(collision_enabled=True)
+    floor_enable = bool(getattr(cfg, "vision_room_floor_enable", False))
+    ceiling_enable = bool(getattr(cfg, "vision_room_ceiling_enable", False))
 
-    def spawn_wall(name: str, size: tuple[float, float, float], pos: tuple[float, float, float]) -> None:
-        wall_cfg = sim_utils.CuboidCfg(
+    def spawn_cuboid(name: str, size: tuple[float, float, float], pos: tuple[float, float, float]) -> None:
+        cuboid_cfg = sim_utils.CuboidCfg(
             size=size,
             visual_material=visual_material,
             collision_props=collision_props,
         )
-        wall_cfg.func(f"{env_prim_path}/Room/{name}", wall_cfg, translation=pos)
+        cuboid_cfg.func(f"{env_prim_path}/Room/{name}", cuboid_cfg, translation=pos)
+
+    def spawn_wall(name: str, size: tuple[float, float, float], pos: tuple[float, float, float]) -> None:
+        spawn_cuboid(name, size, pos)
 
     spawn_wall("WallPosX", (thickness, width + 2.0 * thickness, height), (cx + 0.5 * length, cy, z))
     spawn_wall("WallNegX", (thickness, width + 2.0 * thickness, height), (cx - 0.5 * length, cy, z))
     spawn_wall("WallPosY", (length, thickness, height), (cx, cy + 0.5 * width, z))
     spawn_wall("WallNegY", (length, thickness, height), (cx, cy - 0.5 * width, z))
+    slab_thickness = 0.02
+    if floor_enable:
+        spawn_cuboid("Floor", (length, width, slab_thickness), (cx, cy, -0.5 * slab_thickness))
+    if ceiling_enable:
+        spawn_cuboid("Ceiling", (length, width, slab_thickness), (cx, cy, height + 0.5 * slab_thickness))
     print(
         "[info] Vision isolation room spawned: "
         f"env={env_prim_path}, size=({length:.1f}, {width:.1f}, {height:.1f}), "
-        f"wall={thickness:.2f}, collision={bool(collision_props is not None)}"
+        f"wall={thickness:.2f}, collision={bool(collision_props is not None)}, "
+        f"floor={floor_enable}, ceiling={ceiling_enable}"
     )
 
 
@@ -717,8 +728,8 @@ class ForkliftPalletInsertLiftEnv(DirectRLEnv):
             return
         if env_ids is None:
             env_ids = torch.arange(self.num_envs, dtype=torch.long, device=self.device)
-            base_pos = self.robot.data.root_pos_w
-            base_quat = self.robot.data.root_quat_w
+            base_pos = self.robot.data.root_pos_w if root_pos is None else root_pos
+            base_quat = self.robot.data.root_quat_w if root_quat is None else root_quat
         else:
             env_ids = env_ids.to(device=self.device, dtype=torch.long)
             base_pos = self.robot.data.root_pos_w[env_ids] if root_pos is None else root_pos
@@ -744,8 +755,15 @@ class ForkliftPalletInsertLiftEnv(DirectRLEnv):
         self._camera_left.set_world_poses(left_pos_w, left_quat_w, env_ids=env_ids, convention="world")
         self._camera_right.set_world_poses(right_pos_w, right_quat_w, env_ids=env_ids, convention="world")
 
+    def _latest_robot_root_pose_from_physx(self) -> tuple[torch.Tensor, torch.Tensor]:
+        """Read the latest robot root pose from PhysX before IsaacLab data buffers update."""
+        root_pose = self.robot.root_physx_view.get_root_transforms().clone()
+        root_quat_xyzw = root_pose[:, 3:7]
+        root_quat_wxyz = torch.cat((root_quat_xyzw[:, 3:4], root_quat_xyzw[:, :3]), dim=-1)
+        return root_pose[:, :3], root_quat_wxyz
+
     def step(self, action: torch.Tensor):
-        """Step the env while syncing body-mounted RTX cameras before every render."""
+        """Step the env while syncing forklift-fixed RTX cameras before every render."""
         action = action.to(self.device)
         if self.cfg.action_noise_model:
             action = self._action_noise_model(action)
@@ -759,7 +777,8 @@ class ForkliftPalletInsertLiftEnv(DirectRLEnv):
             self.scene.write_data_to_sim()
             self.sim.step(render=False)
             if self._sim_step_counter % self.cfg.sim.render_interval == 0 and is_rendering:
-                self._sync_dual_camera_poses()
+                root_pos, root_quat = self._latest_robot_root_pose_from_physx()
+                self._sync_dual_camera_poses(root_pos=root_pos, root_quat=root_quat)
                 self.sim.render()
             self.scene.update(dt=self.physics_dt)
 
@@ -1170,7 +1189,7 @@ class ForkliftPalletInsertLiftEnv(DirectRLEnv):
         self.robot = Articulation(self.cfg.robot_cfg)
         self.pallet = RigidObject(self.cfg.pallet_cfg)
 
-        # strict body-follow camera: body 不存在则直接失败（不做 fallback）
+        # strict camera rig: mount body 不存在则直接失败（不做 fallback）
         if self._camera_enabled:
             mount_body = str(getattr(self.cfg, "camera_mount_body", "body"))
             mount_prim = f"/World/envs/env_0/Robot/{mount_body}"
@@ -1183,12 +1202,15 @@ class ForkliftPalletInsertLiftEnv(DirectRLEnv):
                 )
 
             if self._dual_camera_enabled:
-                self.cfg.tiled_camera_left.prim_path = f"/World/envs/env_.*/Robot/{mount_body}/CameraLeft"
-                self.cfg.tiled_camera_right.prim_path = f"/World/envs/env_.*/Robot/{mount_body}/CameraRight"
-                self.cfg.tiled_camera_left.offset.pos = self.cfg.dual_camera_left_pos_local
-                self.cfg.tiled_camera_right.offset.pos = self.cfg.dual_camera_right_pos_local
-                self.cfg.tiled_camera_left.offset.rot = _quat_from_rpy_deg(*self.cfg.dual_camera_left_rpy_local_deg)
-                self.cfg.tiled_camera_right.offset.rot = _quat_from_rpy_deg(*self.cfg.dual_camera_right_rpy_local_deg)
+                # Spawn cameras at the env root and drive their world pose explicitly
+                # from PhysX. Parent-mounting under Robot/body plus manual world pose
+                # writes can render one frame behind the forklift or double-apply motion.
+                self.cfg.tiled_camera_left.prim_path = "/World/envs/env_.*/CameraLeft"
+                self.cfg.tiled_camera_right.prim_path = "/World/envs/env_.*/CameraRight"
+                self.cfg.tiled_camera_left.offset.pos = (0.0, 0.0, 0.0)
+                self.cfg.tiled_camera_right.offset.pos = (0.0, 0.0, 0.0)
+                self.cfg.tiled_camera_left.offset.rot = (1.0, 0.0, 0.0, 0.0)
+                self.cfg.tiled_camera_right.offset.rot = (1.0, 0.0, 0.0, 0.0)
                 self.cfg.tiled_camera_left.width = int(self.cfg.dual_camera_width)
                 self.cfg.tiled_camera_left.height = int(self.cfg.dual_camera_height)
                 self.cfg.tiled_camera_right.width = int(self.cfg.dual_camera_width)
@@ -3834,9 +3856,42 @@ class ForkliftPalletInsertLiftEnv(DirectRLEnv):
             mask_f = mask.float()
             return torch.sum(values * mask_f) / mask_f.sum().clamp_min(1.0)
 
-        r_insert = r_insert * insertion_stage_gate
-        r_commit_progress = r_commit_progress * insertion_stage_gate
-        r_commit_forward = r_commit_forward * insertion_stage_gate
+        terminal_continue_gate = torch.zeros((self.num_envs,), device=self.device)
+        terminal_reward_gate = insertion_stage_gate
+        if bool(getattr(self.cfg, "progress_teacher_terminal_continue_gate_enable", False)):
+            terminal_insert_gate = smoothstep(
+                (
+                    insert_norm
+                    - float(getattr(self.cfg, "progress_teacher_terminal_continue_start_norm", 0.08))
+                )
+                / max(
+                    float(getattr(self.cfg, "progress_teacher_terminal_continue_ramp_norm", 0.18)),
+                    1e-6,
+                )
+            )
+            terminal_commit_gate = smoothstep(
+                (
+                    commit_gate
+                    - float(getattr(self.cfg, "progress_teacher_terminal_continue_commit_min", 0.05))
+                )
+                / max(
+                    float(getattr(self.cfg, "progress_teacher_terminal_continue_commit_full", 0.35))
+                    - float(getattr(self.cfg, "progress_teacher_terminal_continue_commit_min", 0.05)),
+                    1e-6,
+                )
+            )
+            terminal_continue_gate = (
+                terminal_insert_gate
+                * terminal_commit_gate
+                * push_gate
+                * clean_gate
+                * commit_active
+            )
+            terminal_reward_gate = torch.maximum(insertion_stage_gate, terminal_continue_gate)
+
+        r_insert = r_insert * terminal_reward_gate
+        r_commit_progress = r_commit_progress * terminal_reward_gate
+        r_commit_forward = r_commit_forward * terminal_reward_gate
         min_commit_forward = float(getattr(self.cfg, "progress_teacher_min_commit_forward_action", 0.25))
         not_committing = torch.clamp(
             (min_commit_forward - self.actions[:, 0]) / max(min_commit_forward, 1e-6),
@@ -3848,6 +3903,16 @@ class ForkliftPalletInsertLiftEnv(DirectRLEnv):
             * commit_gate
             * not_committing
             * commit_active
+        )
+        r_terminal_forward_bonus = (
+            float(getattr(self.cfg, "progress_teacher_terminal_forward_bonus_weight", 0.0))
+            * forward_action
+            * terminal_continue_gate
+        )
+        r_terminal_reverse_penalty = (
+            -float(getattr(self.cfg, "progress_teacher_terminal_reverse_penalty_weight", 0.0))
+            * torch.clamp(-self.actions[:, 0], min=0.0, max=1.0)
+            * terminal_continue_gate
         )
 
         align_potential = (
@@ -3865,7 +3930,7 @@ class ForkliftPalletInsertLiftEnv(DirectRLEnv):
             * insert_gate
             * push_gate
             * clean_gate
-            * insertion_stage_gate
+            * terminal_reward_gate
         )
 
         action_penalty = (
@@ -4042,7 +4107,7 @@ class ForkliftPalletInsertLiftEnv(DirectRLEnv):
         r_hold_progress = (
             float(getattr(self.cfg, "progress_teacher_hold_weight", 20.0))
             * hold_delta
-            * insertion_stage_gate
+            * terminal_reward_gate
         )
 
         time_ratio = self.episode_length_buf.float() / (self.max_episode_length + 1e-6)
@@ -4071,6 +4136,8 @@ class ForkliftPalletInsertLiftEnv(DirectRLEnv):
             + curve_corridor_reward
             + r_pre_align_latch_bonus
             + mouth_stall_penalty
+            + r_terminal_forward_bonus
+            + r_terminal_reverse_penalty
             + align_potential
             + insert_potential
             + r_hold_progress
@@ -4145,6 +4212,8 @@ class ForkliftPalletInsertLiftEnv(DirectRLEnv):
         self.extras["log"]["progress_teacher/curve_corridor_quality"] = curve_corridor_quality.mean()
         self.extras["log"]["progress_teacher/curve_phase_gate"] = curve_phase_gate.mean()
         self.extras["log"]["progress_teacher/insertion_stage_gate"] = insertion_stage_gate.mean()
+        self.extras["log"]["progress_teacher/terminal_continue_gate"] = terminal_continue_gate.mean()
+        self.extras["log"]["progress_teacher/terminal_reward_gate"] = terminal_reward_gate.mean()
         self.extras["log"]["progress_teacher/r_pre_align_latch_bonus"] = r_pre_align_latch_bonus.mean()
         self.extras["log"]["progress_teacher/pre_align_axis_err"] = pre_align_axis_err.mean()
         self.extras["log"]["progress_teacher/pre_align_current_quality_gate"] = (
@@ -4153,6 +4222,8 @@ class ForkliftPalletInsertLiftEnv(DirectRLEnv):
         self.extras["log"]["phase/frac_pre_align_latch_keep"] = pre_align_latch_keep.float().mean()
         self.extras["log"]["phase/frac_pre_align_released"] = pre_align_released.float().mean()
         self.extras["log"]["progress_teacher/mouth_stall_penalty"] = mouth_stall_penalty.mean()
+        self.extras["log"]["progress_teacher/r_terminal_forward_bonus"] = r_terminal_forward_bonus.mean()
+        self.extras["log"]["progress_teacher/r_terminal_reverse_penalty"] = r_terminal_reverse_penalty.mean()
         self.extras["log"]["progress_teacher/align_potential"] = align_potential.mean()
         self.extras["log"]["progress_teacher/insert_potential"] = insert_potential.mean()
         self.extras["log"]["progress_teacher/r_hold_progress"] = r_hold_progress.mean()
@@ -4255,6 +4326,40 @@ class ForkliftPalletInsertLiftEnv(DirectRLEnv):
         self.extras["log"]["phase/frac_pre_align_latched_inserted"] = pre_align_latched_inserted.float().mean()
         self.extras["log"]["phase/frac_pre_align_latched_dirty_insert"] = (
             pre_align_latched_dirty_insert.float().mean()
+        )
+        insert_gt_0p10 = insert_norm > 0.10
+        mouth_insert_gt_0p10 = (stage_dist_front <= 0.03) & insert_gt_0p10
+        mouth_commit_insert_gt_0p10 = mouth_insert_gt_0p10 & (commit_gate >= 0.8)
+        drive_action = self.actions[:, 0]
+        self.extras["log"]["terminal/max_insert_norm"] = insert_norm.max()
+        self.extras["log"]["terminal/frac_insert_norm_gt_0p10"] = insert_gt_0p10.float().mean()
+        self.extras["log"]["terminal/frac_insert_norm_gt_0p25"] = (insert_norm > 0.25).float().mean()
+        self.extras["log"]["terminal/frac_insert_norm_gt_0p50"] = (insert_norm > 0.50).float().mean()
+        self.extras["log"]["terminal/frac_insert_norm_gt_0p75"] = (insert_norm > 0.75).float().mean()
+        self.extras["log"]["terminal/frac_mouth_insert_gt_0p10"] = mouth_insert_gt_0p10.float().mean()
+        self.extras["log"]["terminal/drive_mouth_insert_gt_0p10_mean"] = _masked_mean(
+            drive_action, mouth_insert_gt_0p10
+        )
+        self.extras["log"]["terminal/drive_mouth_insert_gt_0p10_neg_frac"] = _masked_mean(
+            (drive_action < 0.0).float(), mouth_insert_gt_0p10
+        )
+        self.extras["log"]["terminal/drive_mouth_commit_insert_gt_0p10_mean"] = _masked_mean(
+            drive_action, mouth_commit_insert_gt_0p10
+        )
+        self.extras["log"]["terminal/drive_mouth_commit_insert_gt_0p10_neg_frac"] = _masked_mean(
+            (drive_action < 0.0).float(), mouth_commit_insert_gt_0p10
+        )
+        self.extras["log"]["terminal/insertion_stage_gate_insert_gt_0p10_mean"] = _masked_mean(
+            insertion_stage_gate, insert_gt_0p10
+        )
+        self.extras["log"]["terminal/continue_gate_insert_gt_0p10_mean"] = _masked_mean(
+            terminal_continue_gate, insert_gt_0p10
+        )
+        self.extras["log"]["terminal/reward_gate_insert_gt_0p10_mean"] = _masked_mean(
+            terminal_reward_gate, insert_gt_0p10
+        )
+        self.extras["log"]["terminal/pre_align_latched_insert_gt_0p10_frac"] = _masked_mean(
+            pre_align_latched_bool.float(), insert_gt_0p10
         )
         self.extras["log"]["phase/hold_counter_mean"] = self._hold_counter.mean()
         self.extras["log"]["phase/grace_zone_frac"] = grace_zone.float().mean()

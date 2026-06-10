@@ -570,6 +570,7 @@ class ForkliftPalletInsertLiftEnv(DirectRLEnv):
         self._progress_teacher_dirty_insert_termination = torch.zeros(
             (self.num_envs,), dtype=torch.bool, device=self.device
         )
+        self._rgb_reachability_audit_snapshot: dict[str, torch.Tensor] = {}
         self._lift_pos_target = torch.zeros((self.num_envs,), device=self.device)
 
         # ---- 实验 B: 论文原生 Reward 缓存 ----
@@ -734,6 +735,17 @@ class ForkliftPalletInsertLiftEnv(DirectRLEnv):
     def _pallet_disp_xy(self) -> torch.Tensor:
         """Pallet XY displacement from the actual reset pose of each env."""
         return torch.norm(self.pallet.data.root_pos_w[:, :2] - self._pallet_reset_xy_w, dim=-1)
+
+    def _log_success_instant(self, success: torch.Tensor, *, prefix: str = "success") -> torch.Tensor:
+        """Log the primary success metric as instant per-env occupancy."""
+        success_f = success.float()
+        instant = success_f.mean()
+        if "log" not in self.extras:
+            self.extras["log"] = {}
+        self.extras["log"][f"{prefix}/instant_per_env"] = instant
+        self.extras["log"][f"{prefix}/instant_per_env_count"] = success_f.sum()
+        self.extras["log"][f"{prefix}/instant_per_env_den"] = float(self.num_envs)
+        return instant
 
     def _camera_local_pos_m(self, values: tuple[float, float, float]) -> torch.Tensor:
         """Convert camera local offsets to meters, accepting legacy centimeter configs."""
@@ -1344,6 +1356,8 @@ class ForkliftPalletInsertLiftEnv(DirectRLEnv):
         self.reward_buf = self._get_rewards()
 
         reset_env_ids = self.reset_buf.nonzero(as_tuple=False).squeeze(-1)
+        if bool(getattr(self.cfg, "rgb_reachability_audit_snapshot_enable", False)):
+            self._capture_rgb_reachability_audit_snapshot(reset_env_ids)
         if len(reset_env_ids) > 0:
             self._reset_idx(reset_env_ids)
             if self.sim.has_rtx_sensors() and self.cfg.rerender_on_reset:
@@ -3165,7 +3179,8 @@ class ForkliftPalletInsertLiftEnv(DirectRLEnv):
         )
         self.extras["log"]["phase/frac_dirty_insert"] = dirty_insert.float().mean()
         self.extras["log"]["phase/frac_aligned"] = align_entry.float().mean()
-        self.extras["log"]["phase/frac_success"] = success.float().mean()
+        success_instant = self._log_success_instant(success)
+        self.extras["log"]["phase/frac_success"] = success_instant
         self.extras["log"]["phase/frac_push_free"] = push_free.float().mean()
         self.extras["log"]["phase/hold_counter_mean"] = self._hold_counter.mean()
         self.extras["log"]["phase/grace_zone_frac"] = grace_zone.float().mean()
@@ -3194,8 +3209,12 @@ class ForkliftPalletInsertLiftEnv(DirectRLEnv):
                 )
         if hasattr(self, "_ep_success_rate_ema"):
             self.extras["log"]["episode/success_rate_ema"] = self._ep_success_rate_ema
+            self.extras["log"]["success/episode_rate_ema_nonprimary"] = self._ep_success_rate_ema
         if self._ep_total_count > 0:
             self.extras["log"]["episode/success_rate_total"] = (
+                self._ep_success_count / self._ep_total_count
+            )
+            self.extras["log"]["success/episode_rate_total_nonprimary"] = (
                 self._ep_success_count / self._ep_total_count
             )
 
@@ -4179,7 +4198,8 @@ class ForkliftPalletInsertLiftEnv(DirectRLEnv):
         )
         self.extras["log"]["phase/frac_inserted"] = insert_entry.float().mean()
         self.extras["log"]["phase/frac_geom_success"] = success.float().mean()
-        self.extras["log"]["phase/frac_success"] = success.float().mean()
+        success_instant = self._log_success_instant(success)
+        self.extras["log"]["phase/frac_success"] = success_instant
         self.extras["log"]["phase/frac_push_free"] = push_free.float().mean()
         self.extras["log"]["phase/frac_clean_ok"] = clean_ok.float().mean()
         self.extras["log"]["phase/frac_inserted_push_free"] = inserted_push_free.float().mean()
@@ -4206,6 +4226,10 @@ class ForkliftPalletInsertLiftEnv(DirectRLEnv):
                 self._ep_done_count += self.reset_terminated.float().sum()
         self.extras["log"]["episode/success_rate_ema"] = self._ep_success_rate_ema
         self.extras["log"]["episode/success_rate_total"] = (
+            self._ep_success_count / torch.clamp(self._ep_done_count, min=1.0)
+        )
+        self.extras["log"]["success/episode_rate_ema_nonprimary"] = self._ep_success_rate_ema
+        self.extras["log"]["success/episode_rate_total_nonprimary"] = (
             self._ep_success_count / torch.clamp(self._ep_done_count, min=1.0)
         )
 
@@ -4429,7 +4453,16 @@ class ForkliftPalletInsertLiftEnv(DirectRLEnv):
         else:
             clean_insert_unlocked = torch.ones_like(push_free, dtype=torch.bool)
         unlock_gate = clean_insert_unlocked.float()
-        training_success_next = hold_state.hold_counter_next >= self._hold_steps
+        hold_success_next = hold_state.hold_counter_next >= self._hold_steps
+        stage1_instant_success_enable = (
+            bool(getattr(self.cfg, "stage1_instant_insert_success_enable", False))
+            and self._stage_1_mode
+            and bool(getattr(self.cfg, "stage1_success_without_lift", False))
+        )
+        if stage1_instant_success_enable:
+            training_success_next = success_geom_training
+        else:
+            training_success_next = hold_success_next
         if self.cfg.align_before_contact_disable_insert_success:
             training_success_next = torch.zeros_like(training_success_next)
         if self.cfg.clean_insert_unlock_enable:
@@ -4583,6 +4616,97 @@ class ForkliftPalletInsertLiftEnv(DirectRLEnv):
             align_contact_score = torch.zeros_like(insert_norm)
             align_before_contact_reward = torch.zeros_like(insert_norm)
             align_before_contact_hold_reward = torch.zeros_like(insert_norm)
+
+        if bool(getattr(self.cfg, "preinsert_contact_align_delta_reward_enable", False)):
+            center_delta_contact = torch.clamp(
+                self._prev_center_y_err - center_y_err,
+                min=-self.cfg.preinsert_delta_clip_y_m,
+                max=self.cfg.preinsert_delta_clip_y_m,
+            )
+            tip_delta_contact = torch.clamp(
+                self._prev_tip_y_err - tip_y_err,
+                min=-self.cfg.preinsert_delta_clip_y_m,
+                max=self.cfg.preinsert_delta_clip_y_m,
+            )
+            yaw_delta_contact = torch.clamp(
+                self._prev_yaw_err_deg - yaw_err_deg,
+                min=-self.cfg.preinsert_delta_clip_yaw_deg,
+                max=self.cfg.preinsert_delta_clip_yaw_deg,
+            )
+            center_delta_contact_pos = torch.clamp(
+                center_delta_contact / max(self.cfg.preinsert_delta_clip_y_m, 1e-6),
+                min=0.0,
+                max=1.0,
+            )
+            tip_delta_contact_pos = torch.clamp(
+                tip_delta_contact / max(self.cfg.preinsert_delta_clip_y_m, 1e-6),
+                min=0.0,
+                max=1.0,
+            )
+            yaw_delta_contact_pos = torch.clamp(
+                yaw_delta_contact / max(self.cfg.preinsert_delta_clip_yaw_deg, 1e-6),
+                min=0.0,
+                max=1.0,
+            )
+            contact_align_delta_score = (
+                float(getattr(self.cfg, "preinsert_contact_align_delta_center_weight", 1.0))
+                * center_delta_contact_pos
+                + float(getattr(self.cfg, "preinsert_contact_align_delta_yaw_weight", 1.0))
+                * yaw_delta_contact_pos
+                + float(getattr(self.cfg, "preinsert_contact_align_delta_tip_weight", 1.0))
+                * tip_delta_contact_pos
+            )
+            contact_align_regress_score = torch.clamp(
+                -(
+                    center_delta_contact / max(self.cfg.preinsert_delta_clip_y_m, 1e-6)
+                    + yaw_delta_contact / max(self.cfg.preinsert_delta_clip_yaw_deg, 1e-6)
+                    + tip_delta_contact / max(self.cfg.preinsert_delta_clip_y_m, 1e-6)
+                )
+                / 3.0,
+                min=0.0,
+                max=1.0,
+            )
+            r_preinsert_contact_align_delta = (
+                float(getattr(self.cfg, "preinsert_contact_align_delta_reward_weight", 0.0))
+                * preinsert_contact_active
+                * push_free.float()
+                * contact_align_delta_score
+            )
+            r_preinsert_contact_align_regress = -(
+                float(getattr(self.cfg, "preinsert_contact_align_regress_penalty_weight", 0.0))
+                * preinsert_contact_active
+                * contact_align_regress_score
+            )
+        else:
+            center_delta_contact = torch.zeros_like(insert_norm)
+            tip_delta_contact = torch.zeros_like(insert_norm)
+            yaw_delta_contact = torch.zeros_like(insert_norm)
+            contact_align_delta_score = torch.zeros_like(insert_norm)
+            contact_align_regress_score = torch.zeros_like(insert_norm)
+            r_preinsert_contact_align_delta = torch.zeros_like(insert_norm)
+            r_preinsert_contact_align_regress = torch.zeros_like(insert_norm)
+
+        preinsert_contact_high_forward_score = torch.zeros_like(insert_norm)
+        if bool(getattr(self.cfg, "preinsert_contact_high_forward_penalty_enable", False)):
+            forward_action_for_contact = torch.clamp(self.actions[:, 0], min=0.0, max=1.0)
+            preinsert_contact_high_forward_score = smoothstep(
+                (
+                    forward_action_for_contact
+                    - float(getattr(self.cfg, "preinsert_contact_high_forward_action_max", 0.30))
+                )
+                / max(
+                    float(getattr(self.cfg, "preinsert_contact_high_forward_action_ramp", 0.12)),
+                    1e-6,
+                )
+            )
+            r_preinsert_contact_high_forward = -(
+                float(getattr(self.cfg, "preinsert_contact_high_forward_penalty_weight", 0.0))
+                * preinsert_contact_active
+                * (1.0 - preinsert_contact_clean_gate)
+                * preinsert_contact_high_forward_score
+            )
+        else:
+            r_preinsert_contact_high_forward = torch.zeros_like(insert_norm)
 
         r_d = r_d_raw * clean_insert_gate
         r_cd = r_cd_raw * clean_insert_gate if self.cfg.clean_insert_gate_r_cd else r_cd_raw
@@ -5129,6 +5253,441 @@ class ForkliftPalletInsertLiftEnv(DirectRLEnv):
             r_preinsert_retreat = -preinsert_active * (
                 self.cfg.preinsert_retreat_penalty_weight * retreat_delta
             )
+            recovery_forward_action = torch.clamp(self.actions[:, 0], min=0.0, max=1.0)
+            recovery_reverse_action = torch.clamp(-self.actions[:, 0], min=0.0, max=1.0)
+            preinsert_drive_guidance_dist_gate = smoothstep(
+                (
+                    float(getattr(self.cfg, "preinsert_drive_guidance_dist_max_m", self.cfg.preinsert_active_dist_max_m))
+                    - dist_front
+                )
+                / max(
+                    float(getattr(self.cfg, "preinsert_drive_guidance_dist_ramp_m", self.cfg.preinsert_active_dist_ramp_m)),
+                    1e-6,
+                )
+            )
+            preinsert_drive_guidance_insert_gate = (
+                insert_norm
+                < float(getattr(self.cfg, "preinsert_drive_guidance_insert_frac_max", self.cfg.preinsert_insert_frac_max))
+            ).float()
+            preinsert_drive_guidance_gate = (
+                preinsert_drive_guidance_dist_gate
+                * preinsert_drive_guidance_insert_gate
+                * preinsert_forward_gate
+                * push_free_train.float()
+            )
+            preinsert_reverse_penalty_gate = (
+                preinsert_drive_guidance_dist_gate
+                * preinsert_drive_guidance_insert_gate
+                * push_free_train.float()
+            )
+            preinsert_static_motion_active = torch.zeros_like(insert_norm)
+            preinsert_static_motion_forward_score = torch.zeros_like(insert_norm)
+            preinsert_static_motion_progress_score = torch.zeros_like(insert_norm)
+            preinsert_static_motion_score = torch.zeros_like(insert_norm)
+            preinsert_static_motion_gate = torch.ones_like(insert_norm)
+            if bool(getattr(self.cfg, "preinsert_static_motion_gate_enable", False)):
+                preinsert_static_motion_dist_gate = smoothstep(
+                    (
+                        float(
+                            getattr(
+                                self.cfg,
+                                "preinsert_static_motion_gate_dist_max_m",
+                                self.cfg.preinsert_active_dist_max_m,
+                            )
+                        )
+                        - dist_front
+                    )
+                    / max(
+                        float(
+                            getattr(
+                                self.cfg,
+                                "preinsert_static_motion_gate_dist_ramp_m",
+                                self.cfg.preinsert_active_dist_ramp_m,
+                            )
+                        ),
+                        1e-6,
+                    )
+                )
+                preinsert_static_motion_insert_gate = (
+                    insert_norm
+                    < float(
+                        getattr(
+                            self.cfg,
+                            "preinsert_static_motion_gate_insert_frac_max",
+                            self.cfg.preinsert_insert_frac_max,
+                        )
+                    )
+                ).float()
+                preinsert_static_motion_active = (
+                    preinsert_static_motion_dist_gate * preinsert_static_motion_insert_gate
+                )
+                preinsert_static_motion_forward_score = smoothstep(
+                    (
+                        recovery_forward_action
+                        - float(getattr(self.cfg, "preinsert_static_motion_gate_forward_min", 0.02))
+                    )
+                    / max(
+                        float(getattr(self.cfg, "preinsert_static_motion_gate_forward_ramp", 0.16)),
+                        1e-6,
+                    )
+                )
+                static_motion_forward_ramp_down = float(
+                    getattr(self.cfg, "preinsert_static_motion_gate_forward_ramp_down", 0.0)
+                )
+                if static_motion_forward_ramp_down > 0.0:
+                    preinsert_static_motion_forward_score = (
+                        preinsert_static_motion_forward_score
+                        * (
+                            1.0
+                            - smoothstep(
+                                (
+                                    recovery_forward_action
+                                    - float(
+                                        getattr(
+                                            self.cfg,
+                                            "preinsert_static_motion_gate_forward_max",
+                                            1.0,
+                                        )
+                                    )
+                                )
+                                / max(static_motion_forward_ramp_down, 1e-6)
+                            )
+                        )
+                    )
+                preinsert_static_motion_progress_score = dist_delta_pos
+                preinsert_static_motion_score = torch.maximum(
+                    preinsert_static_motion_forward_score,
+                    preinsert_static_motion_progress_score,
+                )
+                preinsert_static_motion_floor = max(
+                    0.0,
+                    min(1.0, float(getattr(self.cfg, "preinsert_static_motion_gate_floor", 1.0))),
+                )
+                preinsert_static_motion_gate = (
+                    1.0
+                    - preinsert_static_motion_active
+                    + preinsert_static_motion_active
+                    * (
+                        preinsert_static_motion_floor
+                        + (1.0 - preinsert_static_motion_floor) * preinsert_static_motion_score
+                    )
+                )
+                r_d = r_d * preinsert_static_motion_gate
+                r_cd = r_cd * preinsert_static_motion_gate
+                r_cpsi = r_cpsi * preinsert_static_motion_gate
+            preinsert_aligned_forward_action_score = torch.zeros_like(insert_norm)
+            preinsert_aligned_forward_action_gate = torch.zeros_like(insert_norm)
+            if bool(getattr(self.cfg, "preinsert_aligned_forward_action_reward_enable", False)):
+                preinsert_aligned_forward_action_score = smoothstep(
+                    (
+                        recovery_forward_action
+                        - float(getattr(self.cfg, "preinsert_aligned_forward_action_min", 0.04))
+                    )
+                    / max(
+                        float(getattr(self.cfg, "preinsert_aligned_forward_action_ramp", 0.18)),
+                        1e-6,
+                    )
+                )
+                aligned_forward_action_ramp_down = float(
+                    getattr(self.cfg, "preinsert_aligned_forward_action_ramp_down", 0.0)
+                )
+                if aligned_forward_action_ramp_down > 0.0:
+                    preinsert_aligned_forward_action_score = (
+                        preinsert_aligned_forward_action_score
+                        * (
+                            1.0
+                            - smoothstep(
+                                (
+                                    recovery_forward_action
+                                    - float(
+                                        getattr(
+                                            self.cfg,
+                                            "preinsert_aligned_forward_action_max",
+                                            1.0,
+                                        )
+                                    )
+                                )
+                                / max(aligned_forward_action_ramp_down, 1e-6)
+                            )
+                        )
+                    )
+                preinsert_aligned_forward_action_gate = (
+                    preinsert_drive_guidance_gate
+                )
+                r_preinsert_aligned_forward_action = (
+                    float(getattr(self.cfg, "preinsert_aligned_forward_action_reward_weight", 0.0))
+                    * preinsert_aligned_forward_action_gate
+                    * preinsert_aligned_forward_action_score
+                )
+            else:
+                r_preinsert_aligned_forward_action = torch.zeros_like(insert_norm)
+            preinsert_reverse_action_score = torch.zeros_like(insert_norm)
+            if bool(getattr(self.cfg, "preinsert_reverse_action_penalty_enable", False)):
+                preinsert_reverse_action_score = smoothstep(
+                    (
+                        recovery_reverse_action
+                        - float(getattr(self.cfg, "preinsert_reverse_action_min", 0.04))
+                    )
+                    / max(
+                        float(getattr(self.cfg, "preinsert_reverse_action_ramp", 0.18)),
+                        1e-6,
+                    )
+                )
+                r_preinsert_reverse_action = -(
+                    float(getattr(self.cfg, "preinsert_reverse_action_penalty_weight", 0.0))
+                    * preinsert_reverse_penalty_gate
+                    * preinsert_reverse_action_score
+                )
+            else:
+                r_preinsert_reverse_action = torch.zeros_like(insert_norm)
+            preinsert_near_fast_forward_gate = torch.zeros_like(insert_norm)
+            preinsert_near_fast_forward_score = torch.zeros_like(insert_norm)
+            if bool(getattr(self.cfg, "preinsert_near_fast_forward_penalty_enable", False)):
+                preinsert_near_fast_forward_dist_gate = smoothstep(
+                    (
+                        float(
+                            getattr(
+                                self.cfg,
+                                "preinsert_near_fast_forward_dist_max_m",
+                                0.45,
+                            )
+                        )
+                        - dist_front
+                    )
+                    / max(
+                        float(
+                            getattr(
+                                self.cfg,
+                                "preinsert_near_fast_forward_dist_ramp_m",
+                                0.35,
+                            )
+                        ),
+                        1e-6,
+                    )
+                )
+                preinsert_near_fast_forward_insert_gate = (
+                    insert_norm
+                    < float(
+                        getattr(
+                            self.cfg,
+                            "preinsert_near_fast_forward_insert_frac_max",
+                            0.45,
+                        )
+                    )
+                ).float()
+                preinsert_near_fast_forward_gate = (
+                    preinsert_near_fast_forward_dist_gate
+                    * preinsert_near_fast_forward_insert_gate
+                )
+                preinsert_near_fast_forward_score = smoothstep(
+                    (
+                        recovery_forward_action
+                        - float(
+                            getattr(
+                                self.cfg,
+                                "preinsert_near_fast_forward_action_max",
+                                0.16,
+                            )
+                        )
+                    )
+                    / max(
+                        float(
+                            getattr(
+                                self.cfg,
+                                "preinsert_near_fast_forward_action_ramp",
+                                0.20,
+                            )
+                        ),
+                        1e-6,
+                    )
+                )
+                r_preinsert_near_fast_forward = -(
+                    float(
+                        getattr(
+                            self.cfg,
+                            "preinsert_near_fast_forward_penalty_weight",
+                            0.0,
+                        )
+                    )
+                    * preinsert_near_fast_forward_gate
+                    * preinsert_near_fast_forward_score
+                )
+            else:
+                r_preinsert_near_fast_forward = torch.zeros_like(insert_norm)
+            preinsert_clean_slow_forward_gate = torch.zeros_like(insert_norm)
+            preinsert_clean_slow_forward_action_score = torch.zeros_like(insert_norm)
+            preinsert_clean_slow_forward_align_gate = torch.zeros_like(insert_norm)
+            preinsert_clean_slow_forward_push_gate = torch.zeros_like(insert_norm)
+            if bool(getattr(self.cfg, "preinsert_clean_slow_forward_reward_enable", False)):
+                preinsert_clean_slow_forward_dist_gate = smoothstep(
+                    (
+                        float(
+                            getattr(
+                                self.cfg,
+                                "preinsert_clean_slow_forward_dist_max_m",
+                                0.55,
+                            )
+                        )
+                        - dist_front
+                    )
+                    / max(
+                        float(
+                            getattr(
+                                self.cfg,
+                                "preinsert_clean_slow_forward_dist_ramp_m",
+                                0.60,
+                            )
+                        ),
+                        1e-6,
+                    )
+                )
+                preinsert_clean_slow_forward_insert_gate = (
+                    insert_norm
+                    < float(
+                        getattr(
+                            self.cfg,
+                            "preinsert_clean_slow_forward_insert_frac_max",
+                            0.55,
+                        )
+                    )
+                ).float()
+                preinsert_clean_slow_forward_center_gate = torch.exp(
+                    -(
+                        center_y_err
+                        / max(
+                            float(
+                                getattr(
+                                    self.cfg,
+                                    "preinsert_clean_slow_forward_center_sigma_m",
+                                    0.18,
+                                )
+                            ),
+                            1e-6,
+                        )
+                    )
+                    ** 2
+                )
+                preinsert_clean_slow_forward_yaw_gate = torch.exp(
+                    -(
+                        yaw_err_deg
+                        / max(
+                            float(
+                                getattr(
+                                    self.cfg,
+                                    "preinsert_clean_slow_forward_yaw_sigma_deg",
+                                    10.0,
+                                )
+                            ),
+                            1e-6,
+                        )
+                    )
+                    ** 2
+                )
+                preinsert_clean_slow_forward_tip_gate = torch.where(
+                    dist_front <= self.cfg.tip_align_near_dist,
+                    torch.exp(
+                        -(
+                            tip_y_err
+                            / max(
+                                float(
+                                    getattr(
+                                        self.cfg,
+                                        "preinsert_clean_slow_forward_tip_sigma_m",
+                                        0.18,
+                                    )
+                                ),
+                                1e-6,
+                            )
+                        )
+                        ** 2
+                    ),
+                    torch.ones_like(tip_y_err),
+                )
+                preinsert_clean_slow_forward_align_gate = (
+                    preinsert_clean_slow_forward_center_gate
+                    * preinsert_clean_slow_forward_yaw_gate
+                    * preinsert_clean_slow_forward_tip_gate
+                )
+                preinsert_clean_slow_forward_push_gate = torch.exp(
+                    -(
+                        pallet_disp_xy
+                        / max(
+                            float(
+                                getattr(
+                                    self.cfg,
+                                    "preinsert_clean_slow_forward_push_sigma_m",
+                                    0.08,
+                                )
+                            ),
+                            1e-6,
+                        )
+                    )
+                    ** 2
+                )
+                slow_forward_up = smoothstep(
+                    (
+                        recovery_forward_action
+                        - float(
+                            getattr(
+                                self.cfg,
+                                "preinsert_clean_slow_forward_action_min",
+                                0.03,
+                            )
+                        )
+                    )
+                    / max(
+                        float(
+                            getattr(
+                                self.cfg,
+                                "preinsert_clean_slow_forward_action_ramp_up",
+                                0.10,
+                            )
+                        ),
+                        1e-6,
+                    )
+                )
+                slow_forward_down = 1.0 - smoothstep(
+                    (
+                        recovery_forward_action
+                        - float(
+                            getattr(
+                                self.cfg,
+                                "preinsert_clean_slow_forward_action_max",
+                                0.24,
+                            )
+                        )
+                    )
+                    / max(
+                        float(
+                            getattr(
+                                self.cfg,
+                                "preinsert_clean_slow_forward_action_ramp_down",
+                                0.16,
+                            )
+                        ),
+                        1e-6,
+                    )
+                )
+                preinsert_clean_slow_forward_action_score = slow_forward_up * slow_forward_down
+                preinsert_clean_slow_forward_gate = (
+                    preinsert_clean_slow_forward_dist_gate
+                    * preinsert_clean_slow_forward_insert_gate
+                    * preinsert_clean_slow_forward_align_gate
+                    * preinsert_clean_slow_forward_push_gate
+                )
+                r_preinsert_clean_slow_forward = (
+                    float(
+                        getattr(
+                            self.cfg,
+                            "preinsert_clean_slow_forward_reward_weight",
+                            0.0,
+                        )
+                    )
+                    * preinsert_clean_slow_forward_gate
+                    * preinsert_clean_slow_forward_action_score
+                )
+            else:
+                r_preinsert_clean_slow_forward = torch.zeros_like(insert_norm)
             preinsert_recovery_retreat_mask = (
                 preinsert_recovery_action_shortfall_gate
                 if self.cfg.preinsert_recovery_stateful_enable
@@ -5139,8 +5698,6 @@ class ForkliftPalletInsertLiftEnv(DirectRLEnv):
                 * preinsert_recovery_retreat_mask
                 * recovery_retreat_delta
             )
-            recovery_reverse_action = torch.clamp(-self.actions[:, 0], min=0.0, max=1.0)
-            recovery_forward_action = torch.clamp(self.actions[:, 0], min=0.0, max=1.0)
             recovery_steer_action = torch.abs(torch.clamp(self.actions[:, 1], min=-1.0, max=1.0))
             r_preinsert_recovery_reverse_action = (
                 self.cfg.preinsert_recovery_reverse_action_reward_weight
@@ -5227,6 +5784,27 @@ class ForkliftPalletInsertLiftEnv(DirectRLEnv):
             preinsert_forward_gate = torch.ones_like(insert_norm)
             preinsert_forward_gate_core = torch.ones_like(insert_norm)
             r_preinsert_align = torch.zeros_like(insert_norm)
+            r_preinsert_aligned_forward_action = torch.zeros_like(insert_norm)
+            r_preinsert_reverse_action = torch.zeros_like(insert_norm)
+            preinsert_drive_guidance_gate = torch.zeros_like(insert_norm)
+            preinsert_drive_guidance_dist_gate = torch.zeros_like(insert_norm)
+            preinsert_reverse_penalty_gate = torch.zeros_like(insert_norm)
+            preinsert_static_motion_gate = torch.ones_like(insert_norm)
+            preinsert_static_motion_active = torch.zeros_like(insert_norm)
+            preinsert_static_motion_score = torch.zeros_like(insert_norm)
+            preinsert_static_motion_forward_score = torch.zeros_like(insert_norm)
+            preinsert_static_motion_progress_score = torch.zeros_like(insert_norm)
+            preinsert_aligned_forward_action_score = torch.zeros_like(insert_norm)
+            preinsert_aligned_forward_action_gate = torch.zeros_like(insert_norm)
+            preinsert_reverse_action_score = torch.zeros_like(insert_norm)
+            preinsert_near_fast_forward_gate = torch.zeros_like(insert_norm)
+            preinsert_near_fast_forward_score = torch.zeros_like(insert_norm)
+            r_preinsert_near_fast_forward = torch.zeros_like(insert_norm)
+            preinsert_clean_slow_forward_gate = torch.zeros_like(insert_norm)
+            preinsert_clean_slow_forward_action_score = torch.zeros_like(insert_norm)
+            preinsert_clean_slow_forward_align_gate = torch.zeros_like(insert_norm)
+            preinsert_clean_slow_forward_push_gate = torch.zeros_like(insert_norm)
+            r_preinsert_clean_slow_forward = torch.zeros_like(insert_norm)
             r_preinsert_forward_misaligned = torch.zeros_like(insert_norm)
             r_preinsert_retreat = torch.zeros_like(insert_norm)
             r_preinsert_recovery_retreat = torch.zeros_like(insert_norm)
@@ -5235,6 +5813,22 @@ class ForkliftPalletInsertLiftEnv(DirectRLEnv):
             r_preinsert_recovery_safe_align = torch.zeros_like(insert_norm)
             r_preinsert_recovery_forward_block = torch.zeros_like(insert_norm)
             r_preinsert_recovery_forward_action = torch.zeros_like(insert_norm)
+
+        if bool(getattr(self.cfg, "eval_dirty_preinsert_gate_shaping_rewards", False)):
+            r_preinsert_align = r_preinsert_align * eval_dirty_preinsert_gate
+            r_preinsert_aligned_forward_action = (
+                r_preinsert_aligned_forward_action * eval_dirty_preinsert_gate
+            )
+            r_preinsert_clean_slow_forward = (
+                r_preinsert_clean_slow_forward * eval_dirty_preinsert_gate
+            )
+            r_preinsert_contact_align_delta = (
+                r_preinsert_contact_align_delta * eval_dirty_preinsert_gate
+            )
+            align_before_contact_reward = align_before_contact_reward * eval_dirty_preinsert_gate
+            align_before_contact_hold_reward = (
+                align_before_contact_hold_reward * eval_dirty_preinsert_gate
+            )
 
         if self.cfg.preinsert_push_penalty_enable:
             preinsert_push_amount = torch.clamp(
@@ -5443,6 +6037,8 @@ class ForkliftPalletInsertLiftEnv(DirectRLEnv):
             r_clean_insert_progress +
             r_push_free_insert_progress +
             r_preinsert_align +
+            r_preinsert_aligned_forward_action +
+            r_preinsert_clean_slow_forward +
             r_preinsert_recovery_retreat +
             r_preinsert_recovery_reverse_action +
             r_preinsert_recovery_reverse_steer_align +
@@ -5451,6 +6047,7 @@ class ForkliftPalletInsertLiftEnv(DirectRLEnv):
             r_preinsert_recovery_release_bonus +
             align_before_contact_reward +
             align_before_contact_hold_reward +
+            r_preinsert_contact_align_delta +
             r_postinsert_align
         )
         
@@ -5504,6 +6101,8 @@ class ForkliftPalletInsertLiftEnv(DirectRLEnv):
             r_eval_dirty_preinsert +
             r_dirty_success +
             r_preinsert_retreat +
+            r_preinsert_reverse_action +
+            r_preinsert_near_fast_forward +
             r_preinsert_forward_misaligned +
             r_preinsert_recovery_forward_block +
             r_preinsert_recovery_forward_action +
@@ -5514,6 +6113,8 @@ class ForkliftPalletInsertLiftEnv(DirectRLEnv):
             r_preinsert_push_termination +
             r_dirty_push_termination +
             r_preinsert_contact_drive +
+            r_preinsert_contact_align_regress +
+            r_preinsert_contact_high_forward +
             r_premature_lift +
             r_post_lift_stability
         )
@@ -5597,6 +6198,27 @@ class ForkliftPalletInsertLiftEnv(DirectRLEnv):
         clean_insert_gate_inserted_mean = _masked_mean(clean_insert_gate, is_inserted)
         clean_align_gate_inserted_mean = _masked_mean(clean_align_gate, is_inserted)
         clean_push_gate_inserted_mean = _masked_mean(clean_push_gate, is_inserted)
+        hold_exit_align_inserted = _masked_mean(
+            hold_state.align_exit_exceeded.float(), is_inserted
+        )
+        hold_exit_insert_inserted = _masked_mean(
+            hold_state.insert_exit_exceeded.float(), is_inserted
+        )
+        hold_exit_tip_inserted = _masked_mean(
+            hold_state.tip_exit_exceeded.float(), is_inserted
+        )
+        hold_exit_lift_inserted = _masked_mean(
+            hold_state.lift_exit_exceeded.float(), is_inserted
+        )
+        hold_exit_z_invalid_inserted = _masked_mean((~valid_insert_z).float(), is_inserted)
+        hold_exit_any_inserted = _masked_mean(
+            hold_state.any_exit_exceeded.float(), is_inserted
+        )
+        hold_grace_zone_inserted = _masked_mean(hold_state.grace_zone.float(), is_inserted)
+        hold_entry_inserted = _masked_mean(hold_state.hold_entry.float(), is_inserted)
+        hold_counter_next_inserted_mean = _masked_mean(
+            hold_state.hold_counter_next, is_inserted
+        )
         prehold_reachable_band_frac_of_inserted = _masked_mean(prehold_reachable_band.float(), is_inserted)
         prehold_reachable_band_companion_frac_of_inserted = _masked_mean(
             prehold_reachable_band_companion.float(), is_inserted
@@ -5649,6 +6271,18 @@ class ForkliftPalletInsertLiftEnv(DirectRLEnv):
             r_push_free_insert_progress.mean()
         )
         self.extras["log"]["paper_reward/r_preinsert_align"] = r_preinsert_align.mean()
+        self.extras["log"]["paper_reward/r_preinsert_aligned_forward_action"] = (
+            r_preinsert_aligned_forward_action.mean()
+        )
+        self.extras["log"]["paper_reward/r_preinsert_clean_slow_forward"] = (
+            r_preinsert_clean_slow_forward.mean()
+        )
+        self.extras["log"]["paper_reward/r_preinsert_reverse_action"] = (
+            r_preinsert_reverse_action.mean()
+        )
+        self.extras["log"]["paper_reward/r_preinsert_near_fast_forward"] = (
+            r_preinsert_near_fast_forward.mean()
+        )
         self.extras["log"]["paper_reward/r_preinsert_forward_misaligned"] = (
             r_preinsert_forward_misaligned.mean()
         )
@@ -5693,6 +6327,15 @@ class ForkliftPalletInsertLiftEnv(DirectRLEnv):
         self.extras["log"]["paper_reward/r_align_before_contact"] = align_before_contact_reward.mean()
         self.extras["log"]["paper_reward/r_align_before_contact_hold"] = (
             align_before_contact_hold_reward.mean()
+        )
+        self.extras["log"]["paper_reward/r_preinsert_contact_align_delta"] = (
+            r_preinsert_contact_align_delta.mean()
+        )
+        self.extras["log"]["paper_reward/r_preinsert_contact_align_regress"] = (
+            r_preinsert_contact_align_regress.mean()
+        )
+        self.extras["log"]["paper_reward/r_preinsert_contact_high_forward"] = (
+            r_preinsert_contact_high_forward.mean()
         )
         self.extras["log"]["paper_reward/r_postinsert_align"] = r_postinsert_align.mean()
         self.extras["log"]["paper_reward/rg"] = rg.mean()
@@ -5748,6 +6391,45 @@ class ForkliftPalletInsertLiftEnv(DirectRLEnv):
         self.extras["log"]["diag/hold_gate_curriculum_progress"] = float(curriculum_progress)
         self.extras["log"]["diag/hold_counter_delta_mean"] = hold_counter_delta.mean()
         self.extras["log"]["diag/post_lift_stability_active_frac"] = post_lift_active.mean()
+        self.extras["log"]["diag/hold_exit_align_frac"] = (
+            hold_state.align_exit_exceeded.float().mean()
+        )
+        self.extras["log"]["diag/hold_exit_insert_frac"] = (
+            hold_state.insert_exit_exceeded.float().mean()
+        )
+        self.extras["log"]["diag/hold_exit_tip_frac"] = (
+            hold_state.tip_exit_exceeded.float().mean()
+        )
+        self.extras["log"]["diag/hold_exit_lift_frac"] = (
+            hold_state.lift_exit_exceeded.float().mean()
+        )
+        self.extras["log"]["diag/hold_exit_z_invalid_frac"] = (
+            (~valid_insert_z).float().mean()
+        )
+        self.extras["log"]["diag/hold_exit_any_frac"] = (
+            hold_state.any_exit_exceeded.float().mean()
+        )
+        self.extras["log"]["diag/hold_exit_align_frac_of_inserted"] = (
+            hold_exit_align_inserted
+        )
+        self.extras["log"]["diag/hold_exit_insert_frac_of_inserted"] = (
+            hold_exit_insert_inserted
+        )
+        self.extras["log"]["diag/hold_exit_tip_frac_of_inserted"] = hold_exit_tip_inserted
+        self.extras["log"]["diag/hold_exit_lift_frac_of_inserted"] = (
+            hold_exit_lift_inserted
+        )
+        self.extras["log"]["diag/hold_exit_z_invalid_frac_of_inserted"] = (
+            hold_exit_z_invalid_inserted
+        )
+        self.extras["log"]["diag/hold_exit_any_frac_of_inserted"] = hold_exit_any_inserted
+        self.extras["log"]["diag/hold_grace_zone_frac_of_inserted"] = (
+            hold_grace_zone_inserted
+        )
+        self.extras["log"]["diag/hold_entry_frac_of_inserted"] = hold_entry_inserted
+        self.extras["log"]["diag/hold_counter_next_inserted_mean"] = (
+            hold_counter_next_inserted_mean
+        )
         self.extras["log"]["diag/prehold_reachable_band_frac_of_inserted"] = prehold_reachable_band_frac_of_inserted
         self.extras["log"]["diag/prehold_reachable_band_companion_frac_of_inserted"] = (
             prehold_reachable_band_companion_frac_of_inserted
@@ -5755,8 +6437,68 @@ class ForkliftPalletInsertLiftEnv(DirectRLEnv):
         self.extras["log"]["diag/preinsert_active_frac"] = preinsert_active.mean()
         self.extras["log"]["diag/preinsert_contact_active_frac"] = preinsert_contact_active.mean()
         self.extras["log"]["diag/preinsert_contact_clean_gate_mean"] = preinsert_contact_clean_gate.mean()
+        self.extras["log"]["diag/preinsert_contact_align_delta_score_mean"] = (
+            contact_align_delta_score.mean()
+        )
+        self.extras["log"]["diag/preinsert_contact_align_regress_score_mean"] = (
+            contact_align_regress_score.mean()
+        )
+        self.extras["log"]["diag/preinsert_contact_high_forward_score_mean"] = (
+            preinsert_contact_high_forward_score.mean()
+        )
         self.extras["log"]["diag/preinsert_forward_gate_mean"] = preinsert_forward_gate.mean()
         self.extras["log"]["diag/preinsert_forward_gate_core_mean"] = preinsert_forward_gate_core.mean()
+        self.extras["log"]["diag/preinsert_drive_guidance_gate_mean"] = (
+            preinsert_drive_guidance_gate.mean()
+        )
+        self.extras["log"]["diag/preinsert_drive_guidance_dist_gate_mean"] = (
+            preinsert_drive_guidance_dist_gate.mean()
+        )
+        self.extras["log"]["diag/preinsert_reverse_penalty_gate_mean"] = (
+            preinsert_reverse_penalty_gate.mean()
+        )
+        self.extras["log"]["diag/preinsert_static_motion_gate_mean"] = (
+            preinsert_static_motion_gate.mean()
+        )
+        self.extras["log"]["diag/preinsert_static_motion_active_mean"] = (
+            preinsert_static_motion_active.mean()
+        )
+        self.extras["log"]["diag/preinsert_static_motion_score_mean"] = (
+            preinsert_static_motion_score.mean()
+        )
+        self.extras["log"]["diag/preinsert_static_motion_forward_score_mean"] = (
+            preinsert_static_motion_forward_score.mean()
+        )
+        self.extras["log"]["diag/preinsert_static_motion_progress_score_mean"] = (
+            preinsert_static_motion_progress_score.mean()
+        )
+        self.extras["log"]["diag/preinsert_aligned_forward_action_gate_mean"] = (
+            preinsert_aligned_forward_action_gate.mean()
+        )
+        self.extras["log"]["diag/preinsert_aligned_forward_action_score_mean"] = (
+            preinsert_aligned_forward_action_score.mean()
+        )
+        self.extras["log"]["diag/preinsert_reverse_action_score_mean"] = (
+            preinsert_reverse_action_score.mean()
+        )
+        self.extras["log"]["diag/preinsert_near_fast_forward_gate_mean"] = (
+            preinsert_near_fast_forward_gate.mean()
+        )
+        self.extras["log"]["diag/preinsert_near_fast_forward_score_mean"] = (
+            preinsert_near_fast_forward_score.mean()
+        )
+        self.extras["log"]["diag/preinsert_clean_slow_forward_gate_mean"] = (
+            preinsert_clean_slow_forward_gate.mean()
+        )
+        self.extras["log"]["diag/preinsert_clean_slow_forward_action_score_mean"] = (
+            preinsert_clean_slow_forward_action_score.mean()
+        )
+        self.extras["log"]["diag/preinsert_clean_slow_forward_align_gate_mean"] = (
+            preinsert_clean_slow_forward_align_gate.mean()
+        )
+        self.extras["log"]["diag/preinsert_clean_slow_forward_push_gate_mean"] = (
+            preinsert_clean_slow_forward_push_gate.mean()
+        )
         self.extras["log"]["diag/preinsert_recovery_active_frac"] = (
             preinsert_recovery_active.mean()
         )
@@ -5901,8 +6643,13 @@ class ForkliftPalletInsertLiftEnv(DirectRLEnv):
         self.extras["log"]["phase/frac_push_free"] = push_free.float().mean()
         self.extras["log"]["phase/frac_push_free_success"] = push_free_success_strict.float().mean()
         self.extras["log"]["phase/frac_rg"] = rg.mean()
-        self.extras["log"]["phase/frac_success"] = success.float().mean()
+        success_instant = self._log_success_instant(success)
+        self.extras["log"]["phase/frac_success"] = success_instant
         self.extras["log"]["phase/frac_training_success_raw"] = training_success_next.float().mean()
+        self.extras["log"]["phase/frac_hold_success_raw"] = hold_success_next.float().mean()
+        self.extras["log"]["diag/stage1_instant_insert_success_enabled"] = float(
+            stage1_instant_success_enable
+        )
         self.extras["log"]["diag/out_of_bounds_frac"] = out_of_bounds.float().mean()
         self.extras["log"]["diag/hold_exit_exceeded_frac"] = hold_state.any_exit_exceeded.float().mean()
         self.extras["log"]["diag/success_term_frac"] = (
@@ -5914,6 +6661,8 @@ class ForkliftPalletInsertLiftEnv(DirectRLEnv):
         self.extras["log"]["traj/yaw_traj_deg_mean"] = yaw_traj_err_deg.mean()
 
         self._prev_y_err[:] = y_err.detach()
+        self._prev_center_y_err[:] = center_y_err.detach()
+        self._prev_tip_y_err[:] = tip_y_err.detach()
         self._prev_yaw_err_deg[:] = yaw_err_deg.detach()
         self._prev_dist_front[:] = dist_front.detach()
         self._prev_lift_height[:] = lift_height.detach()
@@ -5980,6 +6729,73 @@ class ForkliftPalletInsertLiftEnv(DirectRLEnv):
             & (self.episode_length_buf >= int(self.cfg.dirty_push_termination_min_steps))
             & (~self._success_termination)
         )
+
+    def _capture_rgb_reachability_audit_snapshot(self, reset_env_ids: torch.Tensor) -> None:
+        """Store pre-reset per-env geometry for offline RGB reachability audits."""
+        valid = torch.zeros((self.num_envs,), dtype=torch.bool, device=self.device)
+        if reset_env_ids.numel() > 0:
+            valid[reset_env_ids] = True
+
+        self._joint_pos[:] = self.robot.root_physx_view.get_dof_positions()
+        root_pos = self.robot.data.root_pos_w
+        root_quat = self.robot.data.root_quat_w
+        pallet_pos = self.pallet.data.root_pos_w
+        pallet_quat = self.pallet.data.root_quat_w
+        robot_yaw = _quat_to_yaw(root_quat)
+        pallet_yaw = _quat_to_yaw(pallet_quat)
+        yaw_signed = torch.atan2(
+            torch.sin(robot_yaw - pallet_yaw),
+            torch.cos(robot_yaw - pallet_yaw),
+        )
+        yaw_abs_deg = torch.abs(yaw_signed) * (180.0 / math.pi)
+
+        u_in = torch.stack([torch.cos(pallet_yaw), torch.sin(pallet_yaw)], dim=-1)
+        v_lat = torch.stack([-torch.sin(pallet_yaw), torch.cos(pallet_yaw)], dim=-1)
+        tip = self._compute_fork_tip()
+        center = self._compute_fork_center()
+        rel_tip = tip[:, :2] - pallet_pos[:, :2]
+        rel_center = center[:, :2] - pallet_pos[:, :2]
+        rel_root = root_pos[:, :2] - pallet_pos[:, :2]
+        s_front = -0.5 * self.cfg.pallet_depth_m
+        s_tip = torch.sum(rel_tip * u_in, dim=-1)
+        s_center = torch.sum(rel_center * u_in, dim=-1)
+        insert_depth = torch.clamp(s_tip - s_front, min=0.0)
+        insert_norm = torch.clamp(insert_depth / (self.cfg.pallet_depth_m + 1e-6), 0.0, 1.0)
+        dist_front = torch.clamp(s_front - s_tip, min=0.0)
+        center_lateral_signed = torch.sum(rel_center * v_lat, dim=-1)
+        tip_lateral_signed = torch.sum(rel_tip * v_lat, dim=-1)
+        root_lateral_signed = torch.sum(rel_root * v_lat, dim=-1)
+        pallet_disp_xy = self._pallet_disp_xy()
+        inserted = insert_depth >= self._insert_thresh
+        push_free = pallet_disp_xy < self.cfg.push_free_disp_thresh_m
+
+        self._rgb_reachability_audit_snapshot = {
+            "valid": valid.detach().clone(),
+            "root_pos_w": root_pos.detach().clone(),
+            "root_quat_w": root_quat.detach().clone(),
+            "pallet_pos_w": pallet_pos.detach().clone(),
+            "pallet_quat_w": pallet_quat.detach().clone(),
+            "dist_front_m": dist_front.detach().clone(),
+            "insert_norm": insert_norm.detach().clone(),
+            "insert_depth_m": insert_depth.detach().clone(),
+            "s_center_m": s_center.detach().clone(),
+            "center_lateral_m": torch.abs(center_lateral_signed).detach().clone(),
+            "center_lateral_signed_m": center_lateral_signed.detach().clone(),
+            "tip_lateral_m": torch.abs(tip_lateral_signed).detach().clone(),
+            "tip_lateral_signed_m": tip_lateral_signed.detach().clone(),
+            "root_lateral_m": torch.abs(root_lateral_signed).detach().clone(),
+            "root_lateral_signed_m": root_lateral_signed.detach().clone(),
+            "yaw_err_deg": yaw_abs_deg.detach().clone(),
+            "yaw_err_signed_deg": (yaw_signed * 180.0 / math.pi).detach().clone(),
+            "pallet_disp_xy_m": pallet_disp_xy.detach().clone(),
+            "success": self._success_termination.detach().clone(),
+            "inserted": inserted.detach().clone(),
+            "push_free": push_free.detach().clone(),
+            "inserted_push_free": (inserted & push_free).detach().clone(),
+            "reset_terminated": self.reset_terminated.detach().clone(),
+            "reset_time_outs": self.reset_time_outs.detach().clone(),
+            "episode_length": self.episode_length_buf.detach().clone(),
+        }
 
     def _get_dones(self) -> tuple[torch.Tensor, torch.Tensor]:
         # time out

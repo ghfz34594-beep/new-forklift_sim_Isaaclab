@@ -2127,6 +2127,12 @@ class ForkliftPalletApproachV311LegacyAcceptedTeacherVisualFreshCurvePhaseLatchP
 ):
     """Stage 2C-v6: latch can exit when current pre-align quality falls out of the release window."""
 
+    dual_camera_hfov_deg: float = 100.0
+    dual_camera_left_pos_local: tuple[float, float, float] = (150.0, 75.0, 140.0)
+    dual_camera_right_pos_local: tuple[float, float, float] = (150.0, -75.0, 140.0)
+    dual_camera_left_rpy_local_deg: tuple[float, float, float] = (0.0, 40.0, -20.0)
+    dual_camera_right_rpy_local_deg: tuple[float, float, float] = (0.0, 40.0, 20.0)
+
     progress_teacher_pre_align_latch_release_enable: bool = True
     progress_teacher_pre_align_latch_release_dist_front_m: float = 0.62
     progress_teacher_pre_align_latch_release_center_m: float = 0.24
@@ -2136,6 +2142,49 @@ class ForkliftPalletApproachV311LegacyAcceptedTeacherVisualFreshCurvePhaseLatchP
     progress_teacher_pre_align_latch_release_max_insert_norm: float = 0.10
     progress_teacher_pre_align_latch_curve_only_before_ready: bool = True
     progress_teacher_pre_align_latch_reward_weight: float = 6.0
+
+
+@configclass
+class ForkliftPalletApproachV311LegacyAcceptedTeacherVisualFreshCurvePhaseLatchPreAlignV6ReleaseGateGeoObsAblationEnvCfg(
+    ForkliftPalletApproachV311LegacyAcceptedTeacherVisualFreshCurvePhaseLatchPreAlignV6ReleaseGateEnvCfg
+):
+    """V11 H1/H2 ablation: keep V6ReleaseGate rewards, swap RGB policy obs for 21D geometry."""
+
+    use_camera: bool = False
+    use_dual_cameras: bool = False
+    use_asymmetric_critic: bool = False
+    enable_geo_edge_obs: bool = True
+    geo_edge_record_cameras: bool = False
+
+
+@configclass
+class ForkliftPalletApproachV311LegacyAcceptedTeacherVisualFreshCurvePhaseLatchPreAlignV6ReleaseGateGeoObsTerminalFixAEnvCfg(
+    ForkliftPalletApproachV311LegacyAcceptedTeacherVisualFreshCurvePhaseLatchPreAlignV6ReleaseGateGeoObsAblationEnvCfg
+):
+    """Geo terminal fix A: keep terminal insertion rewards alive after shallow entry."""
+
+    progress_teacher_pre_align_latch_release_axis_m: float = 1.20
+    progress_teacher_pre_align_latch_release_max_insert_norm: float = 1.20
+    progress_teacher_insert_potential_weight: float = 3.0
+    progress_teacher_commit_progress_weight: float = 220.0
+    progress_teacher_commit_forward_weight: float = 0.45
+    progress_teacher_mouth_stall_penalty: float = 0.16
+
+
+@configclass
+class ForkliftPalletApproachV311LegacyAcceptedTeacherVisualFreshCurvePhaseLatchPreAlignV6ReleaseGateGeoObsTerminalFixBEnvCfg(
+    ForkliftPalletApproachV311LegacyAcceptedTeacherVisualFreshCurvePhaseLatchPreAlignV6ReleaseGateGeoObsTerminalFixAEnvCfg
+):
+    """Geo terminal fix B: let clean shallow insertion keep terminal reward active."""
+
+    progress_teacher_terminal_continue_gate_enable: bool = True
+    progress_teacher_terminal_continue_start_norm: float = 0.08
+    progress_teacher_terminal_continue_ramp_norm: float = 0.18
+    progress_teacher_terminal_continue_commit_min: float = 0.05
+    progress_teacher_terminal_continue_commit_full: float = 0.35
+    progress_teacher_terminal_forward_bonus_weight: float = 0.35
+    progress_teacher_terminal_reverse_penalty_weight: float = 0.60
+    progress_teacher_hold_weight: float = 45.0
 
 
 @configclass

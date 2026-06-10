@@ -94,6 +94,13 @@ class ForkliftPalletInsertLiftEnvCfg(DirectRLEnvCfg):
     # Stage 1 课程只训练“接近 + 对齐 + 插入”，默认不要求举升进入 success。
     # 这样可以避免“动作层锁 lift，但成功判定仍要求 lift”导致 success 永远为 0。
     stage1_success_without_lift: bool = True
+    # Stage1 RGB/approach success can be an instant geometry event (inserted +
+    # aligned) while multi-step hold remains a stability diagnostic/harder gate.
+    stage1_instant_insert_success_enable: bool = False
+    # Diagnostic-only: when enabled, env.step stores the per-env geometry/success
+    # state immediately before automatic resets so reachability audits can bucket
+    # done steps without changing reward, termination, or policy observations.
+    rgb_reachability_audit_snapshot_enable: bool = False
     # 禁用等待贴图加载，避免因 PNG 解析报错导致仿真启动挂起
     wait_for_textures: bool = False
     # Keep visual camera sync and large-grid ground behavior opt-in.  Privileged
@@ -375,6 +382,7 @@ class ForkliftPalletInsertLiftEnvCfg(DirectRLEnvCfg):
     eval_dirty_preinsert_insert_frac_max: float = 0.45
     eval_dirty_preinsert_gate_positive_rewards: bool = False
     eval_dirty_preinsert_gate_floor: float = 0.80
+    eval_dirty_preinsert_gate_shaping_rewards: bool = False
     eval_dirty_max_reward_gate_enable: bool = False
     eval_dirty_max_reward_gate_floor: float = 0.35
     preinsert_push_penalty_enable: bool = False
@@ -410,6 +418,16 @@ class ForkliftPalletInsertLiftEnvCfg(DirectRLEnvCfg):
     align_before_contact_hold_weight: float = 4.0
     align_before_contact_disable_insert_success: bool = False
     align_before_contact_disable_insert_bonus: bool = False
+    preinsert_contact_align_delta_reward_enable: bool = False
+    preinsert_contact_align_delta_reward_weight: float = 0.0
+    preinsert_contact_align_delta_center_weight: float = 1.0
+    preinsert_contact_align_delta_yaw_weight: float = 1.0
+    preinsert_contact_align_delta_tip_weight: float = 1.0
+    preinsert_contact_align_regress_penalty_weight: float = 0.0
+    preinsert_contact_high_forward_penalty_enable: bool = False
+    preinsert_contact_high_forward_penalty_weight: float = 0.0
+    preinsert_contact_high_forward_action_max: float = 0.30
+    preinsert_contact_high_forward_action_ramp: float = 0.12
     clean_insert_unlock_enable: bool = False
     clean_insert_unlock_align_gate_m: float = 0.09
     clean_insert_unlock_tip_gate_m: float = 0.12
@@ -519,6 +537,48 @@ class ForkliftPalletInsertLiftEnvCfg(DirectRLEnvCfg):
     preinsert_forward_yaw_sigma_deg: float = 6.0
     preinsert_forward_tip_sigma_m: float = 0.10
     preinsert_forward_misaligned_penalty_weight: float = 0.0
+    preinsert_aligned_forward_action_reward_enable: bool = False
+    preinsert_aligned_forward_action_reward_weight: float = 0.0
+    preinsert_aligned_forward_action_min: float = 0.04
+    preinsert_aligned_forward_action_ramp: float = 0.18
+    preinsert_aligned_forward_action_max: float = 1.0
+    preinsert_aligned_forward_action_ramp_down: float = 0.0
+    preinsert_drive_guidance_dist_max_m: float = 1.15
+    preinsert_drive_guidance_dist_ramp_m: float = 0.45
+    preinsert_drive_guidance_insert_frac_max: float = 0.20
+    preinsert_reverse_action_penalty_enable: bool = False
+    preinsert_reverse_action_penalty_weight: float = 0.0
+    preinsert_reverse_action_min: float = 0.04
+    preinsert_reverse_action_ramp: float = 0.18
+    preinsert_static_motion_gate_enable: bool = False
+    preinsert_static_motion_gate_floor: float = 1.0
+    preinsert_static_motion_gate_dist_max_m: float = 1.15
+    preinsert_static_motion_gate_dist_ramp_m: float = 0.45
+    preinsert_static_motion_gate_insert_frac_max: float = 0.20
+    preinsert_static_motion_gate_forward_min: float = 0.02
+    preinsert_static_motion_gate_forward_ramp: float = 0.16
+    preinsert_static_motion_gate_forward_max: float = 1.0
+    preinsert_static_motion_gate_forward_ramp_down: float = 0.0
+    preinsert_near_fast_forward_penalty_enable: bool = False
+    preinsert_near_fast_forward_penalty_weight: float = 0.0
+    preinsert_near_fast_forward_dist_max_m: float = 0.45
+    preinsert_near_fast_forward_dist_ramp_m: float = 0.35
+    preinsert_near_fast_forward_insert_frac_max: float = 0.45
+    preinsert_near_fast_forward_action_max: float = 0.16
+    preinsert_near_fast_forward_action_ramp: float = 0.20
+    preinsert_clean_slow_forward_reward_enable: bool = False
+    preinsert_clean_slow_forward_reward_weight: float = 0.0
+    preinsert_clean_slow_forward_dist_max_m: float = 0.55
+    preinsert_clean_slow_forward_dist_ramp_m: float = 0.60
+    preinsert_clean_slow_forward_insert_frac_max: float = 0.55
+    preinsert_clean_slow_forward_center_sigma_m: float = 0.18
+    preinsert_clean_slow_forward_yaw_sigma_deg: float = 10.0
+    preinsert_clean_slow_forward_tip_sigma_m: float = 0.18
+    preinsert_clean_slow_forward_push_sigma_m: float = 0.08
+    preinsert_clean_slow_forward_action_min: float = 0.03
+    preinsert_clean_slow_forward_action_ramp_up: float = 0.10
+    preinsert_clean_slow_forward_action_max: float = 0.24
+    preinsert_clean_slow_forward_action_ramp_down: float = 0.16
     # Stage A structural repair: explicitly reward increasing insertion depth
     # only when geometry is clean enough. Default-off to preserve baselines.
     clean_insert_progress_reward_enable: bool = False
@@ -1073,7 +1133,10 @@ class ForkliftPalletApproachToyotaDualCameraEnvCfg(ForkliftPalletInsertLiftEnvCf
     toyota_action_noise_std: float = 0.02
     toyota_velocity_obs_noise_std: float = 0.01
 
-    # RGB observations need render-level isolation when num_envs > 1.
+    # RGB observations need render-level isolation when num_envs > 1. Camera
+    # observations are pure RTX buffer reads, so reset must render once after
+    # camera pose sync; otherwise policy RGB can be from the previous episode
+    # while proprio already reflects the new reset state.
     scene: InteractiveSceneCfg = InteractiveSceneCfg(
         num_envs=128,
         env_spacing=20.0,
@@ -1082,7 +1145,7 @@ class ForkliftPalletApproachToyotaDualCameraEnvCfg(ForkliftPalletInsertLiftEnvCf
         clone_in_fabric=False,
     )
     vision_room_enable: bool = True
-    rerender_on_reset: bool = False
+    rerender_on_reset: bool = True
 
 
 @configclass
@@ -1152,7 +1215,7 @@ class ForkliftPalletApproachToyotaDualCameraCleanViewEnvCfg(ForkliftPalletApproa
         clone_in_fabric=False,
     )
     vision_room_enable: bool = True
-    rerender_on_reset: bool = False
+    rerender_on_reset: bool = True
 
 
 @configclass
@@ -1164,6 +1227,163 @@ class ForkliftPalletApproachToyotaDualCameraRoom60EnvCfg(ForkliftPalletApproachT
     any cross-env pixels indicate a scene/layout bug rather than a policy issue.
     """
 
+    stage1_instant_insert_success_enable: bool = True
+    # Room60 v16 reward bridge: prior RGB smokes proved camera/reset/success and
+    # action sign are healthy, but PPO learned to back away while collecting
+    # static trajectory/alignment rewards. Keep success instant/per-env and make
+    # pre-insert static rewards depend on forward action or true approach motion.
+    #
+    # v17: disable the inherited near-field action guard for this RGB task. v16
+    # showed the policy learned forward intent, but the guard clipped it in most
+    # envs. v18 made dirty insertion unprofitable, but pure penalties pushed PPO
+    # back into reverse. v19 restored forward clean-path exploration. v20 uses
+    # the physical low-speed sweep: yaw around 4 deg can still insert push-free,
+    # while yaw around 8 deg pushes the pallet, so the near-contact reward is
+    # narrowed instead of relaxing the success criterion. v21 keeps that clean
+    # contact target but adds near-contact delta alignment so the static narrow
+    # gate is learnable before the forks commit. v22 gated all near-contact
+    # shaping once episode max pallet drift approached the push-free threshold,
+    # which suppressed dirty commit but was too conservative. v23 keeps the gate
+    # as a soft constraint and restores dense low-speed clean-forward incentive.
+    # v24 preserves the observed successful action band (forward around 0.29)
+    # while penalizing the later high-throttle dirty commit shortcut. v25 also
+    # makes the aligned-forward reward itself a slow-band reward so throttle=1
+    # is not rewarded through another path. v26 tried the same slow-band idea on
+    # the static-motion gate, but that made commit too conservative, so Room60
+    # keeps the v25 setting while leaving the default-off v26 knob available.
+    preinsert_action_guard_enable: bool = False
+    alpha_bound: float = 0.8
+    alpha_5: float = 2.0
+    alpha_7: float = 0.1
+    push_free_rg_gate_enable: bool = True
+    push_free_dirty_success_penalty_weight: float = 80.0
+    dirty_insert_early_penalty_enable: bool = True
+    dirty_insert_early_penalty_weight: float = 24.0
+    dirty_insert_early_start_frac: float = 0.01
+    dirty_insert_early_ramp_frac: float = 0.12
+    dirty_insert_early_push_start_m: float = 0.02
+    dirty_insert_early_push_ramp_m: float = 0.08
+    dirty_insert_early_gate_positive_rewards: bool = True
+    dirty_insert_early_gate_floor: float = 0.08
+    eval_dirty_insert_penalty_enable: bool = True
+    eval_dirty_insert_once_penalty_weight: float = 30.0
+    eval_dirty_insert_persistent_penalty_weight: float = 60.0
+    eval_dirty_insert_progress_start_frac: float = 0.01
+    eval_dirty_insert_progress_ramp_frac: float = 0.12
+    eval_dirty_insert_gate_positive_rewards: bool = True
+    eval_dirty_insert_gate_floor: float = 0.08
+    eval_dirty_insert_disp_margin_m: float = -0.015
+    eval_dirty_preinsert_penalty_enable: bool = True
+    eval_dirty_preinsert_penalty_weight: float = 12.0
+    eval_dirty_preinsert_disp_scale_m: float = 0.08
+    eval_dirty_preinsert_contact_dist_m: float = 0.30
+    eval_dirty_preinsert_contact_ramp_m: float = 0.45
+    eval_dirty_preinsert_insert_frac_max: float = 0.60
+    eval_dirty_preinsert_gate_positive_rewards: bool = True
+    eval_dirty_preinsert_gate_floor: float = 0.45
+    eval_dirty_preinsert_gate_shaping_rewards: bool = True
+    eval_dirty_max_reward_gate_enable: bool = True
+    eval_dirty_max_reward_gate_floor: float = 0.08
+    preinsert_push_penalty_start_m: float = 0.02
+    preinsert_push_penalty_scale_m: float = 0.08
+    preinsert_push_penalty_weight: float = 6.0
+    preinsert_push_termination_m: float = 0.11
+    preinsert_push_termination_penalty_weight: float = 130.0
+    dirty_push_termination_m: float = 0.10
+    dirty_push_termination_penalty_weight: float = 190.0
+    preinsert_contact_clean_gate_enable: bool = True
+    preinsert_contact_dist_m: float = 0.12
+    preinsert_contact_dist_ramp_m: float = 0.35
+    preinsert_contact_insert_frac_max: float = 0.50
+    preinsert_contact_gate_floor: float = 0.05
+    preinsert_contact_center_sigma_m: float = 0.08
+    preinsert_contact_yaw_sigma_deg: float = 4.5
+    preinsert_contact_tip_sigma_m: float = 0.08
+    preinsert_contact_drive_penalty_weight: float = 8.0
+    preinsert_contact_drive_vel_scale_mps: float = 0.18
+    align_before_contact_enable: bool = True
+    align_before_contact_reward_weight: float = 16.0
+    align_before_contact_center_sigma_m: float = 0.08
+    align_before_contact_yaw_sigma_deg: float = 4.5
+    align_before_contact_tip_sigma_m: float = 0.08
+    align_before_contact_hold_weight: float = 6.0
+    preinsert_contact_align_delta_reward_enable: bool = True
+    preinsert_contact_align_delta_reward_weight: float = 8.0
+    preinsert_contact_align_delta_center_weight: float = 1.0
+    preinsert_contact_align_delta_yaw_weight: float = 1.0
+    preinsert_contact_align_delta_tip_weight: float = 1.5
+    preinsert_contact_align_regress_penalty_weight: float = 3.0
+    preinsert_contact_high_forward_penalty_enable: bool = True
+    preinsert_contact_high_forward_penalty_weight: float = 18.0
+    preinsert_contact_high_forward_action_max: float = 0.32
+    preinsert_contact_high_forward_action_ramp: float = 0.10
+    preinsert_active_dist_max_m: float = 1.15
+    preinsert_active_dist_ramp_m: float = 0.45
+    preinsert_y_err_delta_weight: float = 3.0
+    preinsert_yaw_err_delta_weight: float = 3.0
+    preinsert_dist_front_delta_weight: float = 5.0
+    preinsert_retreat_penalty_weight: float = 6.0
+    preinsert_forward_align_gate_enable: bool = True
+    preinsert_forward_gate_floor: float = 0.10
+    preinsert_forward_center_sigma_m: float = 0.10
+    preinsert_forward_tip_sigma_m: float = 0.08
+    preinsert_forward_yaw_sigma_deg: float = 5.0
+    preinsert_forward_misaligned_penalty_weight: float = 2.0
+    preinsert_aligned_forward_action_reward_enable: bool = True
+    preinsert_aligned_forward_action_reward_weight: float = 4.0
+    preinsert_aligned_forward_action_min: float = 0.04
+    preinsert_aligned_forward_action_ramp: float = 0.18
+    preinsert_aligned_forward_action_max: float = 0.32
+    preinsert_aligned_forward_action_ramp_down: float = 0.08
+    preinsert_drive_guidance_dist_max_m: float = 4.0
+    preinsert_drive_guidance_dist_ramp_m: float = 2.0
+    preinsert_drive_guidance_insert_frac_max: float = 0.35
+    preinsert_reverse_action_penalty_enable: bool = True
+    preinsert_reverse_action_penalty_weight: float = 8.0
+    preinsert_reverse_action_min: float = 0.04
+    preinsert_reverse_action_ramp: float = 0.18
+    preinsert_static_motion_gate_enable: bool = True
+    preinsert_static_motion_gate_floor: float = 0.05
+    preinsert_static_motion_gate_dist_max_m: float = 4.0
+    preinsert_static_motion_gate_dist_ramp_m: float = 2.0
+    preinsert_static_motion_gate_insert_frac_max: float = 0.30
+    preinsert_static_motion_gate_forward_min: float = 0.02
+    preinsert_static_motion_gate_forward_ramp: float = 0.16
+    preinsert_static_motion_gate_forward_max: float = 1.0
+    preinsert_static_motion_gate_forward_ramp_down: float = 0.0
+    preinsert_near_fast_forward_penalty_enable: bool = True
+    preinsert_near_fast_forward_penalty_weight: float = 10.0
+    preinsert_near_fast_forward_dist_max_m: float = 0.45
+    preinsert_near_fast_forward_dist_ramp_m: float = 0.35
+    preinsert_near_fast_forward_insert_frac_max: float = 0.45
+    preinsert_near_fast_forward_action_max: float = 0.26
+    preinsert_near_fast_forward_action_ramp: float = 0.12
+    preinsert_clean_slow_forward_reward_enable: bool = True
+    preinsert_clean_slow_forward_reward_weight: float = 26.0
+    preinsert_clean_slow_forward_dist_max_m: float = 0.55
+    preinsert_clean_slow_forward_dist_ramp_m: float = 0.60
+    preinsert_clean_slow_forward_insert_frac_max: float = 0.60
+    preinsert_clean_slow_forward_center_sigma_m: float = 0.10
+    preinsert_clean_slow_forward_yaw_sigma_deg: float = 4.5
+    preinsert_clean_slow_forward_tip_sigma_m: float = 0.08
+    preinsert_clean_slow_forward_push_sigma_m: float = 0.08
+    preinsert_clean_slow_forward_action_min: float = 0.02
+    preinsert_clean_slow_forward_action_ramp_up: float = 0.08
+    preinsert_clean_slow_forward_action_max: float = 0.32
+    preinsert_clean_slow_forward_action_ramp_down: float = 0.08
+    clean_insert_progress_reward_enable: bool = True
+    clean_insert_progress_reward_weight: float = 40.0
+    clean_insert_progress_reward_end_frac: float = 0.60
+    clean_insert_progress_reward_gate_floor: float = 0.10
+    clean_insert_center_sigma_m: float = 0.08
+    clean_insert_yaw_sigma_deg: float = 4.5
+    clean_insert_tip_sigma_m: float = 0.08
+    clean_insert_progress_center_sigma_m: float = 0.10
+    clean_insert_progress_yaw_sigma_deg: float = 4.5
+    clean_insert_progress_tip_sigma_m: float = 0.08
+    push_free_insert_progress_reward_enable: bool = True
+    push_free_insert_progress_reward_weight: float = 25.0
+    push_free_insert_progress_end_frac: float = 0.60
     dual_camera_hfov_deg: float = 60.0
     dual_camera_left_pos_local: tuple[float, float, float] = (175.0, 85.0, 180.0)
     dual_camera_right_pos_local: tuple[float, float, float] = (175.0, -85.0, 180.0)
@@ -1188,7 +1408,7 @@ class ForkliftPalletApproachToyotaDualCameraRoom60EnvCfg(ForkliftPalletApproachT
     vision_room_center_x_m: float = -1.5
     vision_room_center_y_m: float = 0.0
     vision_room_color: tuple[float, float, float] = (0.92, 0.92, 0.88)
-    rerender_on_reset: bool = False
+    rerender_on_reset: bool = True
 
 
 @configclass
@@ -2256,7 +2476,7 @@ class ForkliftPalletApproachToyotaProgressStudentCleanViewEnvCfg(
         clone_in_fabric=False,
     )
     vision_room_enable: bool = True
-    rerender_on_reset: bool = False
+    rerender_on_reset: bool = True
 
 
 @configclass
@@ -3003,7 +3223,7 @@ class ForkliftPalletApproachDirectVisualInsertionCleanViewV40DirectEnvCfg(
     vision_room_ceiling_enable: bool = False
     vision_room_floor_enable: bool = True
     vision_room_color: tuple[float, float, float] = (0.92, 0.92, 0.88)
-    rerender_on_reset: bool = False
+    rerender_on_reset: bool = True
 
     # Final direct baseline distribution.  No teacher/reference starts and no
     # near-start mixture, so eval and train are not inflated by easy resets.
@@ -3169,7 +3389,7 @@ class ForkliftPalletApproachToyotaGeoEdgeProgressTeacherCollectEnvCfg(
         clone_in_fabric=False,
     )
     vision_room_enable: bool = True
-    rerender_on_reset: bool = False
+    rerender_on_reset: bool = True
 
 
 @configclass
@@ -3192,7 +3412,7 @@ class ForkliftPalletApproachToyotaGeoEdgeProgressTeacherCollectCleanViewEnvCfg(
         clone_in_fabric=False,
     )
     vision_room_enable: bool = True
-    rerender_on_reset: bool = False
+    rerender_on_reset: bool = True
 
 
 @configclass
@@ -3225,4 +3445,4 @@ class ForkliftPalletApproachToyotaGeoEdgeProgressTeacherCollectRoom60EnvCfg(
     vision_room_center_x_m: float = -1.5
     vision_room_center_y_m: float = 0.0
     vision_room_color: tuple[float, float, float] = (0.92, 0.92, 0.88)
-    rerender_on_reset: bool = False
+    rerender_on_reset: bool = True
